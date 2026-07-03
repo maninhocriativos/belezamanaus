@@ -1,0 +1,6 @@
+export const appEnv = {
+  supabaseUrl: import.meta.env.VITE_SUPABASE_URL ?? "",
+  supabaseAnonKey: import.meta.env.VITE_SUPABASE_ANON_KEY ?? "",
+  appUrl: import.meta.env.VITE_APP_URL ?? "http://localhost:5173",
+  apiUrl: import.meta.env.VITE_API_URL ?? "http://localhost:8787"
+};

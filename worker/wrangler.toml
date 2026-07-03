@@ -1,0 +1,8 @@
+name = "fisiolipo-crm-worker"
+main = "src/index.ts"
+compatibility_date = "2026-07-03"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "fisiolipo-crm-chat"
+database_id = "replace-with-cloudflare-d1-id"

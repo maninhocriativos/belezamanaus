@@ -1,0 +1,1 @@
+-- Seeds seguros para desenvolvimento serao adicionados depois que a organizacao inicial for informada.

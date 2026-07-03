@@ -1,0 +1,25 @@
+{
+  "name": "fisiolipo-crm",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CRM premium para leads, chat, vendas, agente automatizada e performance de anuncios da Fisiolipo.",
+  "workspaces": [
+    "app",
+    "worker"
+  ],
+  "scripts": {
+    "setup": "bash scripts/setup-local.sh",
+    "dev": "bash scripts/dev.sh",
+    "build": "bash scripts/build.sh",
+    "check:env": "bash scripts/check-env.sh",
+    "check:secrets": "bash scripts/check-secrets-not-tracked.sh",
+    "deploy:worker": "bash scripts/deploy-worker.sh",
+    "deploy:pages": "bash scripts/deploy-pages.sh",
+    "deploy:production": "bash scripts/deploy-production.sh",
+    "commit:deploy": "bash scripts/commit-and-deploy.sh"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  }
+}

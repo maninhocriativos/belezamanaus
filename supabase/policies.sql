@@ -1,0 +1,1 @@
+-- Policies RLS consolidadas. A fonte de verdade inicial esta em migrations/0001_initial_schema.sql.
