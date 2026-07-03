@@ -29,6 +29,7 @@ on organizations for select
 using (public.is_organization_member(id));
 
 drop policy if exists "members can read own profile" on profiles;
+drop policy if exists "members can read profiles in same organization" on profiles;
 create policy "members can read profiles in same organization"
 on profiles for select
 using (id = auth.uid() or public.is_organization_member(organization_id));

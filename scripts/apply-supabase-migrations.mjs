@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import process from "node:process";
 import pg from "pg";
 
@@ -70,8 +70,16 @@ const client = new Client({
 
 try {
   await client.connect();
-  await runSqlFile(client, "supabase/migrations/0001_initial_schema.sql");
-  await runSqlFile(client, "supabase/migrations/0002_rls_membership_policies.sql");
+
+  const migrationFiles = (await readdir("supabase/migrations"))
+    .filter((fileName) => fileName.endsWith(".sql"))
+    .sort()
+    .map((fileName) => `supabase/migrations/${fileName}`);
+
+  for (const filePath of migrationFiles) {
+    await runSqlFile(client, filePath);
+  }
+
   await runSqlFile(client, "supabase/seed.sql");
   console.log("Supabase migrations completed.");
 } finally {

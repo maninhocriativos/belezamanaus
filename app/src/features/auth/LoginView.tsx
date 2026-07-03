@@ -8,8 +8,67 @@ type LoginViewProps = {
 
 export function LoginView({ onDemoAccess }: LoginViewProps) {
   const [email, setEmail] = useState("maninhocriativos@gmail.com");
+  const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+
+  async function signInWithPassword() {
+    if (!supabase) {
+      setMessage("Supabase ainda nao esta configurado no ambiente do frontend.");
+      return;
+    }
+
+    setLoading(true);
+    setMessage("");
+
+    const { error } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password
+    });
+
+    setLoading(false);
+    setMessage(error ? error.message : "Acesso confirmado. Abrindo o CRM...");
+  }
+
+  async function createPasswordAccess() {
+    if (!supabase) {
+      setMessage("Supabase ainda nao esta configurado no ambiente do frontend.");
+      return;
+    }
+
+    if (password.length < 6) {
+      setMessage("Use uma senha com pelo menos 6 caracteres.");
+      return;
+    }
+
+    setLoading(true);
+    setMessage("");
+
+    const { data, error } = await supabase.auth.signUp({
+      email: email.trim(),
+      password,
+      options: {
+        data: {
+          full_name: "Maninho Criativos",
+          organization_name: "Beleza Manaus"
+        },
+        emailRedirectTo: `${appEnv.appUrl}/`
+      }
+    });
+
+    setLoading(false);
+
+    if (error) {
+      setMessage(error.message);
+      return;
+    }
+
+    setMessage(
+      data.session
+        ? "Acesso criado. Abrindo o cadastro inicial..."
+        : "Acesso criado. Se o Supabase pedir confirmacao, confirme no e-mail antes de entrar com senha."
+    );
+  }
 
   async function sendMagicLink() {
     if (!supabase) {
@@ -21,14 +80,18 @@ export function LoginView({ onDemoAccess }: LoginViewProps) {
     setMessage("");
 
     const { error } = await supabase.auth.signInWithOtp({
-      email,
+      email: email.trim(),
       options: {
-        emailRedirectTo: appEnv.appUrl
+        emailRedirectTo: `${appEnv.appUrl}/`
       }
     });
 
     setLoading(false);
-    setMessage(error ? error.message : "Link de acesso enviado para o e-mail.");
+    setMessage(
+      error
+        ? `${error.message}. Se o limite de e-mail continuar, use Entrar com senha ou Criar acesso com senha.`
+        : "Link de acesso enviado para o e-mail."
+    );
   }
 
   return (
@@ -37,7 +100,7 @@ export function LoginView({ onDemoAccess }: LoginViewProps) {
         <p className="text-sm font-semibold text-rosebrand-600">Fisiolipo</p>
         <h1 className="mt-1 text-2xl font-bold">Entrar no CRM</h1>
         <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
-          Use o e-mail administrador da Beleza Manaus para receber um link seguro de acesso.
+          Use o e-mail administrador da Beleza Manaus. A entrada por senha evita o limite de envio de e-mails.
         </p>
 
         {!isSupabaseConfigured && (
@@ -59,13 +122,43 @@ export function LoginView({ onDemoAccess }: LoginViewProps) {
           value={email}
         />
 
+        <label className="mt-4 block text-sm font-medium" htmlFor="password">
+          Senha
+        </label>
+        <input
+          className="mt-2 w-full rounded-lg border border-rosebrand-100 bg-transparent px-3 py-2 text-sm outline-none focus:border-rosebrand-400 dark:border-zinc-800"
+          id="password"
+          onChange={(event) => setPassword(event.target.value)}
+          placeholder="Digite ou cadastre uma senha"
+          type="password"
+          value={password}
+        />
+
         <button
           className="mt-4 w-full rounded-lg bg-rosebrand-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={loading || !email || !password}
+          onClick={signInWithPassword}
+          type="button"
+        >
+          {loading ? "Entrando..." : "Entrar com senha"}
+        </button>
+
+        <button
+          className="mt-3 w-full rounded-lg border border-rosebrand-200 px-4 py-2 text-sm font-semibold text-rosebrand-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-800 dark:text-rosebrand-200"
+          disabled={loading || !email || !password}
+          onClick={createPasswordAccess}
+          type="button"
+        >
+          Criar acesso com senha
+        </button>
+
+        <button
+          className="mt-3 w-full rounded-lg border border-rosebrand-100 px-4 py-2 text-sm font-semibold text-zinc-600 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-800 dark:text-zinc-300"
           disabled={loading || !email}
           onClick={sendMagicLink}
           type="button"
         >
-          {loading ? "Enviando..." : "Enviar link de acesso"}
+          Enviar link por e-mail
         </button>
 
         <button
