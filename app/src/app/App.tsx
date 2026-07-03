@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { Session } from "@supabase/supabase-js";
 import { AppShell } from "../components/layout/AppShell";
 import { AgentSettingsForm } from "../components/ui/AgentSettingsForm";
 import { CampaignPerformanceTable } from "../components/ui/CampaignPerformanceTable";
@@ -7,12 +8,46 @@ import { ConversationList } from "../components/ui/ConversationList";
 import { LeadDetailsPanel } from "../components/ui/LeadDetailsPanel";
 import { MetricCard } from "../components/ui/MetricCard";
 import { SaleForm } from "../components/ui/SaleForm";
+import { LoginView } from "../features/auth/LoginView";
 import { ChatWindow } from "../features/chat/ChatWindow";
 import { dashboardMetrics } from "../features/dashboard/dashboard-data";
+import { supabase } from "../lib/supabase";
 import type { AppPage } from "../types/domain";
+import { useEffect } from "react";
 
 export function App() {
   const [activePage, setActivePage] = useState<AppPage>("dashboard");
+  const [session, setSession] = useState<Session | null>(null);
+  const [demoMode, setDemoMode] = useState(false);
+  const [loadingSession, setLoadingSession] = useState(Boolean(supabase));
+
+  useEffect(() => {
+    if (!supabase) return;
+
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      setLoadingSession(false);
+    });
+
+    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+      setLoadingSession(false);
+    });
+
+    return () => data.subscription.unsubscribe();
+  }, []);
+
+  if (loadingSession) {
+    return (
+      <main className="grid min-h-screen place-items-center bg-rosebrand-50 text-zinc-950 dark:bg-zinc-950 dark:text-zinc-50">
+        <p className="text-sm font-semibold text-rosebrand-700">Carregando sessao...</p>
+      </main>
+    );
+  }
+
+  if (!session && !demoMode) {
+    return <LoginView onDemoAccess={() => setDemoMode(true)} />;
+  }
 
   return (
     <AppShell activePage={activePage} onPageChange={setActivePage}>

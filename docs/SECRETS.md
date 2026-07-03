@@ -37,3 +37,22 @@ Preencher localmente em `.secrets/.env.local`:
 * `IMAGE_UNDERSTANDING_PROVIDER`
 
 Nunca usar `SUPABASE_SERVICE_ROLE_KEY` no frontend.
+
+## Onde colar agora
+
+No arquivo local `.secrets/.env.local`, preencha sem aspas:
+
+```text
+SUPABASE_URL=https://SEU-PROJETO.supabase.co
+SUPABASE_ANON_KEY=SUA_ANON_KEY
+SUPABASE_SERVICE_ROLE_KEY=SUA_SERVICE_ROLE_KEY
+```
+
+No Cloudflare Pages, em variaveis de ambiente, preencha somente:
+
+```text
+VITE_SUPABASE_URL=https://SEU-PROJETO.supabase.co
+VITE_SUPABASE_ANON_KEY=SUA_ANON_KEY
+```
+
+Nunca colocar `SUPABASE_SERVICE_ROLE_KEY` no Cloudflare Pages.

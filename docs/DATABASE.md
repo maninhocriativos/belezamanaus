@@ -3,6 +3,17 @@
 ## Supabase/Postgres
 
 Dados principais ficam em Supabase com RLS ativado. A migration inicial cria tabelas de organizacoes, leads, vendas, campanhas, agente, eventos Meta e auditoria.
+As policies de acesso por organizacao ficam em `supabase/migrations/0002_rls_membership_policies.sql`.
+
+## Aplicar migrations
+
+No Supabase Dashboard:
+
+1. Abra o projeto.
+2. Entre em SQL Editor.
+3. Execute `supabase/migrations/0001_initial_schema.sql`.
+4. Execute `supabase/migrations/0002_rls_membership_policies.sql`.
+5. Execute `supabase/seed.sql`.
 
 ## Organizacao inicial
 
