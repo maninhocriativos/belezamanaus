@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { appEnv } from "../../lib/env";
-import { isSupabaseConfigured, supabase } from "../../lib/supabase";
+import { isSupabaseConfigured, supabase, supabaseConfigStatus } from "../../lib/supabase";
 
 type LoginViewProps = {
   onDemoAccess: () => void;
@@ -42,7 +42,9 @@ export function LoginView({ onDemoAccess }: LoginViewProps) {
 
         {!isSupabaseConfigured && (
           <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-            Configure `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY` no Cloudflare Pages para ativar login real.
+            {supabaseConfigStatus === "invalid"
+              ? "VITE_SUPABASE_URL esta invalida. Ela precisa comecar com https:// e usar o Project URL do Supabase."
+              : "Configure VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY no Cloudflare Pages para ativar login real."}
           </div>
         )}
 
