@@ -4,7 +4,8 @@ import { normalizeMessage } from "../services/message-normalizer";
 
 export async function handleChat(request: Request, env: Env): Promise<Response> {
   if (request.method === "GET") {
-    return Response.json(await listMessages(env.DB));
+    const url = new URL(request.url);
+    return Response.json(await listMessages(env.DB, url.searchParams.get("conversationId") ?? undefined));
   }
 
   if (request.method === "POST") {

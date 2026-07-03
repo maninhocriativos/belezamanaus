@@ -19,15 +19,35 @@ const routes = [
   ["/sales", handleSales]
 ] as const;
 
+const corsHeaders = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
+  "access-control-allow-headers": "authorization,content-type"
+};
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    if (request.method === "OPTIONS") {
+      return new Response(null, { headers: corsHeaders });
+    }
+
     const url = new URL(request.url);
     const match = routes.find(([path]) => url.pathname.startsWith(path));
 
     if (!match) {
-      return Response.json({ error: "Not found" }, { status: 404 });
+      return Response.json({ error: "Not found" }, { headers: corsHeaders, status: 404 });
     }
 
-    return match[1](request, env);
+    const response = await match[1](request, env);
+    const nextHeaders = new Headers(response.headers);
+    for (const [key, value] of Object.entries(corsHeaders)) {
+      nextHeaders.set(key, value);
+    }
+
+    return new Response(response.body, {
+      headers: nextHeaders,
+      status: response.status,
+      statusText: response.statusText
+    });
   }
 };
