@@ -11,8 +11,8 @@ import { SaleForm } from "../components/ui/SaleForm";
 import { LoginView } from "../features/auth/LoginView";
 import { OnboardingView } from "../features/auth/OnboardingView";
 import { ChatWindow } from "../features/chat/ChatWindow";
-import { dashboardMetrics } from "../features/dashboard/dashboard-data";
 import { supabase } from "../lib/supabase";
+import { getActiveAgentProfile, listCampaigns, listLeads, listProcedures, type CrmLead } from "../services/crm-data";
 import type { AppPage } from "../types/domain";
 import { useEffect } from "react";
 
@@ -73,10 +73,35 @@ export function App() {
 }
 
 function DashboardView() {
+  const [leadCount, setLeadCount] = useState<number | null>(null);
+  const [campaignCount, setCampaignCount] = useState<number | null>(null);
+  const [procedureCount, setProcedureCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    Promise.all([listLeads(), listCampaigns(), listProcedures()])
+      .then(([leads, campaigns, procedures]) => {
+        setLeadCount(leads.length);
+        setCampaignCount(campaigns.length);
+        setProcedureCount(procedures.length);
+      })
+      .catch(() => {
+        setLeadCount(0);
+        setCampaignCount(0);
+        setProcedureCount(0);
+      });
+  }, []);
+
+  const liveMetrics = [
+    { label: "Leads no Supabase", value: leadCount === null ? "..." : String(leadCount), trend: "banco principal" },
+    { label: "Campanhas", value: campaignCount === null ? "..." : String(campaignCount), trend: "Meta/CRM" },
+    { label: "Procedimentos", value: procedureCount === null ? "..." : String(procedureCount), trend: "ativos" },
+    { label: "Mensagens", value: "D1", trend: "banco separado" }
+  ];
+
   return (
     <>
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {dashboardMetrics.map((metric) => (
+        {liveMetrics.map((metric) => (
           <MetricCard key={metric.label} {...metric} />
         ))}
       </section>
@@ -100,6 +125,15 @@ function ChatView() {
 }
 
 function LeadsView() {
+  const [leads, setLeads] = useState<CrmLead[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    listLeads()
+      .then(setLeads)
+      .finally(() => setLoading(false));
+  }, []);
+
   return (
     <section className="grid gap-5 xl:grid-cols-[1fr_360px]">
       <div className="rounded-lg border border-rosebrand-100 bg-white p-5 shadow-soft dark:border-zinc-800 dark:bg-zinc-900">
@@ -115,13 +149,18 @@ function LeadsView() {
               <tr><th>Lead</th><th>Telefone</th><th>Status</th><th>Campanha</th><th>Score</th></tr>
             </thead>
             <tbody>
-              {[
-                ["Marina Alves", "(92) 99999-0001", "Em atendimento", "Avaliacao Julho", "86"],
-                ["Claudia N.", "(92) 99999-0002", "Novo", "Lead Forms Manaus", "61"],
-                ["Renata Lima", "(92) 99999-0003", "Qualificado", "Remarketing", "78"]
-              ].map((row) => (
-                <tr className="border-t border-rosebrand-50 dark:border-zinc-800" key={row[0]}>
-                  {row.map((cell) => <td className="py-3 pr-3" key={cell}>{cell}</td>)}
+              {loading && (
+                <tr className="border-t border-rosebrand-50 dark:border-zinc-800">
+                  <td className="py-3 pr-3 text-zinc-500" colSpan={5}>Carregando leads do Supabase...</td>
+                </tr>
+              )}
+              {!loading && leads.map((lead) => (
+                <tr className="border-t border-rosebrand-50 dark:border-zinc-800" key={lead.id}>
+                  <td className="py-3 pr-3 font-medium">{lead.full_name}</td>
+                  <td className="py-3 pr-3">{lead.phone}</td>
+                  <td className="py-3 pr-3">{lead.status}</td>
+                  <td className="py-3 pr-3">{lead.meta_campaign_name ?? lead.source}</td>
+                  <td className="py-3 pr-3">{lead.lead_score}</td>
                 </tr>
               ))}
             </tbody>
@@ -165,12 +204,26 @@ function AdsPerformanceView() {
 }
 
 function AgentView() {
+  const [agentName, setAgentName] = useState("Aline");
+  const [agentTone, setAgentTone] = useState("acolhedor, consultivo e objetivo");
+  const [agentMessage, setAgentMessage] = useState("Carregando configuracao da agente...");
+
+  useEffect(() => {
+    getActiveAgentProfile().then((agent) => {
+      if (!agent) return;
+      setAgentName(agent.name);
+      setAgentTone(agent.tone ?? "");
+      setAgentMessage(agent.initial_message ?? "");
+    });
+  }, []);
+
   return (
     <section className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
       <AgentSettingsForm />
       <div className="rounded-lg border border-rosebrand-100 bg-white p-5 shadow-soft dark:border-zinc-800 dark:bg-zinc-900">
-        <h3 className="text-base font-semibold">Base de conhecimento</h3>
-        <textarea className="mt-4 min-h-56 w-full rounded-lg border border-rosebrand-100 bg-transparent px-3 py-2 text-sm dark:border-zinc-800" placeholder="Procedimentos, regras comerciais, perguntas e objecoes" />
+        <h3 className="text-base font-semibold">Agente ativa: {agentName}</h3>
+        <p className="mt-2 text-sm text-zinc-500">Tom: {agentTone}</p>
+        <textarea className="mt-4 min-h-56 w-full rounded-lg border border-rosebrand-100 bg-transparent px-3 py-2 text-sm dark:border-zinc-800" value={agentMessage} readOnly />
       </div>
     </section>
   );
