@@ -1,7 +1,9 @@
 -- Seed inicial seguro. Nao contem secrets.
 insert into organizations (name)
-values ('Beleza Manaus')
-on conflict do nothing;
+select 'Beleza Manaus'
+where not exists (
+  select 1 from organizations where name = 'Beleza Manaus'
+);
 
 -- Primeiro administrador planejado:
 -- maninhocriativos@gmail.com

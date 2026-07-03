@@ -13,6 +13,7 @@
     "build": "bash scripts/build.sh",
     "check:env": "bash scripts/check-env.sh",
     "check:secrets": "bash scripts/check-secrets-not-tracked.sh",
+    "db:migrate": "node scripts/apply-supabase-migrations.mjs",
     "deploy:worker": "bash scripts/deploy-worker.sh",
     "deploy:pages": "bash scripts/deploy-pages.sh",
     "deploy:production": "bash scripts/deploy-production.sh",
@@ -21,5 +22,9 @@
   "engines": {
     "node": ">=20.0.0",
     "npm": ">=10.0.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.20.0",
+    "pg": "^8.22.0"
   }
 }

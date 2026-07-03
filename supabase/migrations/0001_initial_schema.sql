@@ -114,10 +114,12 @@ alter table agent_guardrails enable row level security;
 alter table meta_events_sent enable row level security;
 alter table audit_logs enable row level security;
 
+drop policy if exists "members can read organization rows" on organizations;
 create policy "members can read organization rows" on organizations for select using (
   exists (select 1 from organization_members om where om.organization_id = id and om.user_id = auth.uid())
 );
 
+drop policy if exists "members can read own profile" on profiles;
 create policy "members can read own profile" on profiles for select using (id = auth.uid() or exists (
   select 1 from organization_members om where om.organization_id = profiles.organization_id and om.user_id = auth.uid()
 ));
