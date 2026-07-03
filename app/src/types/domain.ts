@@ -11,3 +11,14 @@ export type LeadStatus =
 export type MessageDirection = "inbound" | "outbound";
 
 export type MessageType = "text" | "audio" | "image" | "document" | "internal_note";
+
+export type AppPage =
+  | "dashboard"
+  | "leads"
+  | "chat"
+  | "sales"
+  | "campaigns"
+  | "adsPerformance"
+  | "agent"
+  | "reports"
+  | "settings";
