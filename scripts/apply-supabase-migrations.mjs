@@ -22,8 +22,39 @@ async function runSqlFile(client, filePath) {
   console.log(`Applied ${filePath}`);
 }
 
+function buildConnectionString(env) {
+  const rawConnectionString = env.get("SUPABASE_DB_URL") || env.get("DATABASE_URL");
+  const rawPassword = env.get("SUPABASE_DB_PASSWORD");
+
+  if (!rawConnectionString) {
+    return "";
+  }
+
+  if (!rawPassword) {
+    return rawConnectionString;
+  }
+
+  const encodedPassword = encodeURIComponent(rawPassword);
+
+  if (rawConnectionString.includes("[YOUR-PASSWORD]")) {
+    return rawConnectionString.replace("[YOUR-PASSWORD]", encodedPassword);
+  }
+
+  if (rawConnectionString.includes("<YOUR-PASSWORD>")) {
+    return rawConnectionString.replace("<YOUR-PASSWORD>", encodedPassword);
+  }
+
+  try {
+    const url = new URL(rawConnectionString);
+    url.password = encodedPassword;
+    return url.toString();
+  } catch {
+    return rawConnectionString;
+  }
+}
+
 const env = await readLocalEnv();
-const connectionString = env.get("SUPABASE_DB_URL") || env.get("DATABASE_URL");
+const connectionString = buildConnectionString(env);
 
 if (!connectionString) {
   console.error("Missing SUPABASE_DB_URL or DATABASE_URL in .secrets/.env.local");

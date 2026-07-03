@@ -18,6 +18,8 @@ Preencher localmente em `.secrets/.env.local`:
 * `SUPABASE_URL`
 * `SUPABASE_ANON_KEY`
 * `SUPABASE_SERVICE_ROLE_KEY`
+* `SUPABASE_DB_URL`
+* `SUPABASE_DB_PASSWORD`
 * `META_APP_ID`
 * `META_APP_SECRET`
 * `META_VERIFY_TOKEN`
@@ -46,7 +48,11 @@ No arquivo local `.secrets/.env.local`, preencha sem aspas:
 SUPABASE_URL=https://SEU-PROJETO.supabase.co
 SUPABASE_ANON_KEY=SUA_ANON_KEY
 SUPABASE_SERVICE_ROLE_KEY=SUA_SERVICE_ROLE_KEY
+SUPABASE_DB_URL=postgresql://postgres.xxxxx:[YOUR-PASSWORD]@aws-0-sa-east-1.pooler.supabase.com:6543/postgres
+SUPABASE_DB_PASSWORD=SUA_SENHA_DO_BANCO
 ```
+
+`SUPABASE_DB_PASSWORD` pode ter caracteres especiais. O script `npm run db:migrate` codifica a senha automaticamente quando a URL contem `[YOUR-PASSWORD]`.
 
 No Cloudflare Pages, em variaveis de ambiente, preencha somente:
 
