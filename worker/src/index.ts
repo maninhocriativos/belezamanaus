@@ -7,6 +7,7 @@ import { handleMetaAdsInsights } from "./routes/meta-ads-insights";
 import { handleMetaConversions } from "./routes/meta-conversions";
 import { handleMetaLeadsWebhook } from "./routes/meta-leads-webhook";
 import { handleSales } from "./routes/sales";
+import { handleUsers } from "./routes/users";
 
 const routes = [
   ["/health", handleHealth],
@@ -16,6 +17,7 @@ const routes = [
   ["/chat", handleChat],
   ["/media", handleMedia],
   ["/agent", handleAgent],
+  ["/users", handleUsers],
   ["/sales", handleSales]
 ] as const;
 
