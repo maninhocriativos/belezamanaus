@@ -2,6 +2,10 @@ import { LeadStatusBadge } from "./LeadStatusBadge";
 import { LeadTemperatureBadge } from "./LeadTemperatureBadge";
 
 export function LeadDetailsPanel() {
+  function notify(action: string) {
+    window.dispatchEvent(new CustomEvent("crm-action", { detail: action }));
+  }
+
   return (
     <aside className="hidden min-h-0 flex-col bg-white dark:bg-zinc-950 xl:flex">
       <header className="flex h-16 items-center border-b border-rosebrand-100 px-4 dark:border-zinc-800">
@@ -24,9 +28,9 @@ export function LeadDetailsPanel() {
           <LeadTemperatureBadge temperature="Quente" />
         </div>
         <div className="mt-5 space-y-2">
-          <button className="w-full rounded-lg bg-rosebrand-600 px-3 py-2 text-sm font-semibold text-white" type="button">Marcar venda</button>
-          <button className="w-full rounded-lg border border-rosebrand-100 px-3 py-2 text-sm font-semibold text-rosebrand-700" type="button">Agendar retorno</button>
-          <button className="w-full rounded-lg border border-rosebrand-100 px-3 py-2 text-sm font-semibold text-zinc-700" type="button">Transferir atendimento</button>
+          <button className="w-full rounded-lg bg-rosebrand-600 px-3 py-2 text-sm font-semibold text-white" onClick={() => notify("Lead marcado como venda em rascunho.")} type="button">Marcar venda</button>
+          <button className="w-full rounded-lg border border-rosebrand-100 px-3 py-2 text-sm font-semibold text-rosebrand-700" onClick={() => notify("Retorno agendado para este lead.")} type="button">Agendar retorno</button>
+          <button className="w-full rounded-lg border border-rosebrand-100 px-3 py-2 text-sm font-semibold text-zinc-700" onClick={() => notify("Atendimento transferido para especialista.")} type="button">Transferir atendimento</button>
         </div>
       </div>
     </aside>

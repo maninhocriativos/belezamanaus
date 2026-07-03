@@ -9,6 +9,7 @@ import { LeadDetailsPanel } from "../components/ui/LeadDetailsPanel";
 import { MetricCard } from "../components/ui/MetricCard";
 import { SaleForm } from "../components/ui/SaleForm";
 import { LoginView } from "../features/auth/LoginView";
+import { OnboardingView } from "../features/auth/OnboardingView";
 import { ChatWindow } from "../features/chat/ChatWindow";
 import { dashboardMetrics } from "../features/dashboard/dashboard-data";
 import { supabase } from "../lib/supabase";
@@ -18,6 +19,7 @@ import { useEffect } from "react";
 export function App() {
   const [activePage, setActivePage] = useState<AppPage>("dashboard");
   const [session, setSession] = useState<Session | null>(null);
+  const [profileComplete, setProfileComplete] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
   const [loadingSession, setLoadingSession] = useState(Boolean(supabase));
 
@@ -26,11 +28,13 @@ export function App() {
 
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
+      setProfileComplete(Boolean(data.session?.user.user_metadata?.crm_profile_complete));
       setLoadingSession(false);
     });
 
     const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession);
+      setProfileComplete(Boolean(nextSession?.user.user_metadata?.crm_profile_complete));
       setLoadingSession(false);
     });
 
@@ -47,6 +51,10 @@ export function App() {
 
   if (!session && !demoMode) {
     return <LoginView onDemoAccess={() => setDemoMode(true)} />;
+  }
+
+  if (session && !demoMode && !profileComplete) {
+    return <OnboardingView onComplete={() => setProfileComplete(true)} session={session} />;
   }
 
   return (
@@ -83,7 +91,7 @@ function DashboardView() {
 
 function ChatView() {
   return (
-    <section className="grid min-h-[calc(100vh-116px)] overflow-hidden rounded-lg border border-rosebrand-100 bg-white shadow-soft dark:border-zinc-800 dark:bg-zinc-900 xl:grid-cols-[360px_minmax(520px,1fr)_320px]">
+    <section className="grid h-full min-h-0 w-full overflow-hidden border-t border-rosebrand-100 bg-white dark:border-zinc-800 dark:bg-zinc-900 xl:grid-cols-[380px_minmax(0,1fr)_340px]">
       <ConversationList />
       <ChatWindow />
       <LeadDetailsPanel />
