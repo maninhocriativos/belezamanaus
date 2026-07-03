@@ -83,7 +83,7 @@ function DashboardView() {
 
 function ChatView() {
   return (
-    <section className="grid gap-5 xl:grid-cols-[320px_1fr_360px]">
+    <section className="grid min-h-[calc(100vh-116px)] overflow-hidden rounded-lg border border-rosebrand-100 bg-white shadow-soft dark:border-zinc-800 dark:bg-zinc-900 xl:grid-cols-[360px_minmax(520px,1fr)_320px]">
       <ConversationList />
       <ChatWindow />
       <LeadDetailsPanel />
