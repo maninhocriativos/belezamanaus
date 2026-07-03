@@ -8,6 +8,10 @@ export function normalizeMessage(payload: any): ChatMessageInput {
     direction: payload.direction === "inbound" ? "inbound" : "outbound",
     senderType: String(payload.senderType ?? "user"),
     messageType: String(payload.messageType ?? "text"),
-    body: String(payload.body ?? "")
+    body: String(payload.body ?? ""),
+    externalMessageId: payload.externalMessageId ? String(payload.externalMessageId) : undefined,
+    mediaMimeType: payload.mediaMimeType ? String(payload.mediaMimeType) : undefined,
+    mediaSize: Number.isFinite(Number(payload.mediaSize)) ? Number(payload.mediaSize) : undefined,
+    mediaUrl: payload.mediaUrl ? String(payload.mediaUrl) : undefined
   };
 }

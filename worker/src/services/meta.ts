@@ -6,6 +6,9 @@ type InboundMetaMessage = {
   conversationId: string;
   externalId?: string;
   leadId: string;
+  mediaMimeType?: string;
+  mediaUrl?: string;
+  messageType: "audio" | "document" | "image" | "text" | "video";
   provider: "facebook" | "instagram" | "whatsapp";
 };
 
@@ -15,6 +18,14 @@ function asObject(value: unknown): Record<string, unknown> {
 
 function getText(value: unknown) {
   return typeof value === "string" ? value : "";
+}
+
+function normalizeAttachmentType(type: string): InboundMetaMessage["messageType"] {
+  if (type === "audio") return "audio";
+  if (type === "video") return "video";
+  if (type === "file" || type === "document") return "document";
+  if (type === "image") return "image";
+  return "text";
 }
 
 function extractMessagingMessages(payload: unknown): InboundMetaMessage[] {
@@ -31,6 +42,7 @@ function extractMessagingMessages(payload: unknown): InboundMetaMessage[] {
       const message = asObject(item.message);
       const senderId = getText(sender.id);
       const text = getText(message.text);
+      const attachments = Array.isArray(message.attachments) ? message.attachments as unknown[] : [];
 
       if (senderId && text) {
         messages.push({
@@ -38,8 +50,28 @@ function extractMessagingMessages(payload: unknown): InboundMetaMessage[] {
           conversationId: `${provider}:${senderId}`,
           externalId: getText(message.mid),
           leadId: senderId,
+          messageType: "text",
           provider
         });
+      }
+
+      for (const rawAttachment of attachments) {
+        const attachment = asObject(rawAttachment);
+        const type = normalizeAttachmentType(getText(attachment.type));
+        const payload = asObject(attachment.payload);
+        const url = getText(payload.url);
+
+        if (senderId && type !== "text") {
+          messages.push({
+            body: `[${type} recebido via ${provider === "instagram" ? "Instagram" : "Facebook"}]`,
+            conversationId: `${provider}:${senderId}`,
+            externalId: getText(message.mid),
+            leadId: senderId,
+            mediaUrl: url,
+            messageType: type,
+            provider
+          });
+        }
       }
     }
   }
@@ -63,7 +95,12 @@ function extractWhatsappMessages(payload: unknown): InboundMetaMessage[] {
         const from = getText(message.from);
         const type = getText(message.type);
         const textBody = getText(asObject(message.text).body);
-        const body = textBody || `[${type || "mensagem"} recebida via WhatsApp]`;
+        const media = asObject(message[type]);
+        const mediaId = getText(media.id);
+        const caption = getText(media.caption);
+        const mimeType = getText(media.mime_type);
+        const messageType = normalizeAttachmentType(type);
+        const body = textBody || caption || `[${messageType || "mensagem"} recebida via WhatsApp]`;
 
         if (from && body) {
           messages.push({
@@ -71,6 +108,9 @@ function extractWhatsappMessages(payload: unknown): InboundMetaMessage[] {
             conversationId: `whatsapp:${from}`,
             externalId: getText(message.id),
             leadId: from,
+            mediaMimeType: mimeType,
+            mediaUrl: mediaId ? `meta-media:${mediaId}` : undefined,
+            messageType,
             provider: "whatsapp"
           });
         }
@@ -90,8 +130,11 @@ async function persistInboundMessages(messages: InboundMetaMessage[], env: Env) 
         body: message.body,
         conversationId: message.conversationId,
         direction: "inbound",
+        externalMessageId: message.externalId,
         leadId: message.leadId,
-        messageType: "text",
+        mediaMimeType: message.mediaMimeType,
+        mediaUrl: message.mediaUrl,
+        messageType: message.messageType,
         organizationId: "beleza-manaus",
         senderType: message.provider
       })

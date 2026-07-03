@@ -8,6 +8,16 @@ export async function listMessages(db: D1Database, conversationId?: string) {
   return { messages: results ?? [] };
 }
 
+export async function listConversations(db: D1Database) {
+  const { results } = await db
+    .prepare(
+      "select c.id, c.lead_id, c.organization_id, c.status, c.last_message_at, m.body as last_message, m.message_type as last_message_type, m.sender_type from chat_conversations c left join chat_messages m on m.id = (select id from chat_messages where conversation_id = c.id order by created_at desc limit 1) order by c.last_message_at desc limit 100"
+    )
+    .all();
+
+  return { conversations: results ?? [] };
+}
+
 export async function saveMessage(db: D1Database, message: ChatMessageInput) {
   const id = crypto.randomUUID();
   await db
@@ -19,9 +29,23 @@ export async function saveMessage(db: D1Database, message: ChatMessageInput) {
 
   await db
     .prepare(
-      "insert into chat_messages (id, conversation_id, lead_id, organization_id, direction, sender_type, message_type, body, status, created_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))"
+      "insert into chat_messages (id, conversation_id, lead_id, organization_id, direction, sender_type, message_type, body, media_url, media_mime_type, media_size, external_message_id, status, created_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))"
     )
-    .bind(id, message.conversationId, message.leadId, message.organizationId, message.direction, message.senderType, message.messageType, message.body, "sent")
+    .bind(
+      id,
+      message.conversationId,
+      message.leadId,
+      message.organizationId,
+      message.direction,
+      message.senderType,
+      message.messageType,
+      message.body,
+      message.mediaUrl ?? null,
+      message.mediaMimeType ?? null,
+      message.mediaSize ?? null,
+      message.externalMessageId ?? null,
+      "sent"
+    )
     .run();
 
   return { id, ...message, status: "sent", created_at: new Date().toISOString() };

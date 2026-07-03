@@ -4,7 +4,7 @@ import { AppShell } from "../components/layout/AppShell";
 import { AgentSettingsForm } from "../components/ui/AgentSettingsForm";
 import { CampaignPerformanceTable } from "../components/ui/CampaignPerformanceTable";
 import { ChartCard } from "../components/charts/ChartCard";
-import { ConversationList } from "../components/ui/ConversationList";
+import { ConversationList, type ChatConversation } from "../components/ui/ConversationList";
 import { LeadDetailsPanel } from "../components/ui/LeadDetailsPanel";
 import { MetricCard } from "../components/ui/MetricCard";
 import { SaleForm } from "../components/ui/SaleForm";
@@ -117,10 +117,20 @@ function DashboardView() {
 }
 
 function ChatView() {
+  const [selectedConversation, setSelectedConversation] = useState<ChatConversation>({
+    id: "marina-alves",
+    last_message: "Quero saber sobre avaliacao",
+    last_message_at: new Date().toISOString(),
+    last_message_type: "text",
+    lead_id: "lead-marina-alves",
+    sender_type: "meta",
+    status: "open"
+  });
+
   return (
     <section className="grid h-full min-h-0 w-full overflow-hidden border-t border-rosebrand-100 bg-white dark:border-zinc-800 dark:bg-zinc-900 xl:grid-cols-[380px_minmax(0,1fr)_340px]">
-      <ConversationList />
-      <ChatWindow />
+      <ConversationList onSelect={setSelectedConversation} selectedConversationId={selectedConversation.id} />
+      <ChatWindow conversationId={selectedConversation.id} leadId={selectedConversation.lead_id} />
       <LeadDetailsPanel />
     </section>
   );

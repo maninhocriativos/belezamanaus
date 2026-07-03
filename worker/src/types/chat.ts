@@ -6,4 +6,8 @@ export type ChatMessageInput = {
   senderType: string;
   messageType: string;
   body: string;
+  externalMessageId?: string;
+  mediaMimeType?: string;
+  mediaSize?: number;
+  mediaUrl?: string;
 };

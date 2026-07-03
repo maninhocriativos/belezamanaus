@@ -1,8 +1,5 @@
-import { Bot, CalendarClock, CheckCheck, MoreVertical, Paperclip, Phone, Send, Smile, UserPlus } from "lucide-react";
+import { Bot, CalendarClock, CheckCheck, FileText, Image as ImageIcon, MoreVertical, Paperclip, Phone, Play, Send, Smile, UserPlus, Video } from "lucide-react";
 import { useEffect, useState } from "react";
-import { AudioMessage } from "../../components/ui/AudioMessage";
-import { DocumentMessage } from "../../components/ui/DocumentMessage";
-import { ImageMessage } from "../../components/ui/ImageMessage";
 import { MessageBubble } from "../../components/ui/MessageBubble";
 import { QuickReplyBar } from "../../components/ui/QuickReplyBar";
 import { apiFetch } from "../../services/api";
@@ -10,6 +7,9 @@ import { apiFetch } from "../../services/api";
 type Message = {
   id: string;
   direction: "in" | "out";
+  mediaMimeType?: string | null;
+  mediaUrl?: string | null;
+  messageType?: string;
   time: string;
   text: string;
 };
@@ -24,10 +24,11 @@ type D1Message = {
   body: string | null;
   created_at: string;
   direction: "inbound" | "outbound";
+  media_mime_type: string | null;
+  media_url: string | null;
+  message_type: string;
 };
 
-const conversationId = "marina-alves";
-const leadId = "lead-marina-alves";
 const organizationId = "beleza-manaus";
 
 function formatMessageTime(value?: string) {
@@ -43,12 +44,96 @@ function toUiMessage(message: D1Message): Message {
   return {
     id: message.id,
     direction: message.direction === "outbound" ? "out" : "in",
+    mediaMimeType: message.media_mime_type,
+    mediaUrl: message.media_url,
+    messageType: message.message_type,
     text: message.body ?? "",
     time: formatMessageTime(message.created_at)
   };
 }
 
-export function ChatWindow() {
+function MediaMessage({ message }: { message: Message }) {
+  const outgoing = message.direction === "out";
+  const shellClass = `max-w-[78%] rounded-lg p-1 shadow-sm ${
+    outgoing
+      ? "ml-auto rounded-tr-sm bg-[#dcf8c6] text-zinc-950 dark:bg-emerald-900 dark:text-zinc-50"
+      : "mr-auto rounded-tl-sm bg-white text-zinc-950 dark:bg-zinc-800 dark:text-zinc-50"
+  }`;
+  const isMetaMedia = message.mediaUrl?.startsWith("meta-media:");
+
+  if (message.messageType === "image") {
+    return (
+      <div className={shellClass}>
+        {message.mediaUrl && !isMetaMedia ? (
+          <img alt={message.text || "Imagem recebida"} className="max-h-80 rounded-md object-cover" src={message.mediaUrl} />
+        ) : (
+          <div className="grid aspect-[4/3] w-64 place-items-center rounded-md bg-zinc-100 text-zinc-500 dark:bg-zinc-900">
+            <ImageIcon size={28} />
+          </div>
+        )}
+        {message.text && <p className="px-2 pt-2 text-sm">{message.text}</p>}
+        {isMetaMedia && <p className="px-2 pt-1 text-xs text-zinc-500">Midia Meta recebida. A URL sera carregada com o token permanente do canal.</p>}
+        <p className="px-2 py-1 text-right text-[10px] text-zinc-500">{message.time}</p>
+      </div>
+    );
+  }
+
+  if (message.messageType === "video") {
+    return (
+      <div className={shellClass}>
+        {message.mediaUrl && !isMetaMedia ? (
+          <video className="max-h-80 rounded-md" controls src={message.mediaUrl} />
+        ) : (
+          <div className="grid aspect-video w-72 place-items-center rounded-md bg-zinc-100 text-zinc-500 dark:bg-zinc-900">
+            <Video size={30} />
+          </div>
+        )}
+        {message.text && <p className="px-2 pt-2 text-sm">{message.text}</p>}
+        {isMetaMedia && <p className="px-2 pt-1 text-xs text-zinc-500">Video registrado pela Meta. Download entra quando o canal estiver com token permanente.</p>}
+        <p className="px-2 py-1 text-right text-[10px] text-zinc-500">{message.time}</p>
+      </div>
+    );
+  }
+
+  if (message.messageType === "audio") {
+    return (
+      <div className={`flex max-w-[78%] items-center gap-3 rounded-lg px-3 py-2 text-sm shadow-sm ${outgoing ? "ml-auto rounded-tr-sm bg-[#dcf8c6] dark:bg-emerald-900" : "mr-auto rounded-tl-sm bg-white dark:bg-zinc-800"}`}>
+        <button className="grid size-9 place-items-center rounded-full bg-rosebrand-600 text-white" title="Reproduzir audio" type="button">
+          <Play size={16} />
+        </button>
+        <div className="min-w-44 flex-1">
+          <div className="h-1.5 rounded-full bg-rosebrand-100 dark:bg-zinc-700">
+            <div className="h-1.5 w-2/5 rounded-full bg-rosebrand-500" />
+          </div>
+          <p className="mt-1 text-xs text-zinc-500">{message.text || "Audio recebido"} · {message.time}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (message.messageType === "document") {
+    return (
+      <div className={`flex max-w-[78%] items-center gap-3 rounded-lg px-3 py-2 text-sm shadow-sm ${outgoing ? "ml-auto rounded-tr-sm bg-[#dcf8c6] dark:bg-emerald-900" : "mr-auto rounded-tl-sm bg-white dark:bg-zinc-800"}`}>
+        <span className="grid size-10 place-items-center rounded-lg bg-rosebrand-50 text-rosebrand-700 dark:bg-zinc-900">
+          <FileText size={19} />
+        </span>
+        <div className="min-w-0">
+          <p className="truncate font-medium">{message.text || "Documento recebido"}</p>
+          <p className="text-xs text-zinc-500">{message.mediaMimeType || "arquivo"} · {message.time}</p>
+        </div>
+      </div>
+    );
+  }
+
+  return <MessageBubble direction={message.direction} text={message.text} time={message.time} />;
+}
+
+type ChatWindowProps = {
+  conversationId: string;
+  leadId: string;
+};
+
+export function ChatWindow({ conversationId, leadId }: ChatWindowProps) {
   const [actionMessage, setActionMessage] = useState("Atendimento iniciado via Meta Leads. A agente pode responder ate o humano assumir.");
   const [messages, setMessages] = useState(initialMessages);
   const [draft, setDraft] = useState("");
@@ -67,6 +152,7 @@ export function ChatWindow() {
 
   useEffect(() => {
     let active = true;
+    setLoadingMessages(true);
 
     apiFetch<{ messages: D1Message[] }>(`/chat?conversationId=${conversationId}`)
       .then((data) => {
@@ -82,7 +168,7 @@ export function ChatWindow() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [conversationId]);
 
   async function persistMessage(text: string, direction: "inbound" | "outbound", senderType: "agent" | "human" | "lead") {
     return apiFetch<D1Message>("/chat", {
@@ -91,7 +177,7 @@ export function ChatWindow() {
         conversationId,
         direction,
         leadId,
-        messageType: "text",
+      messageType: "text",
         organizationId,
         senderType
       }),
@@ -189,12 +275,12 @@ export function ChatWindow() {
         <div className="mx-auto mb-3 rounded-lg bg-amber-50 px-3 py-2 text-center text-xs text-amber-800 shadow-sm">
           {loadingMessages ? "Carregando mensagens do D1..." : actionMessage}
         </div>
-        {messages.map((message) => (
-          <MessageBubble direction={message.direction} key={message.id} text={message.text} time={message.time} />
-        ))}
-        <AudioMessage />
-        <ImageMessage />
-        <DocumentMessage />
+        {!loadingMessages && messages.length === 0 && (
+          <div className="mx-auto mt-16 max-w-sm rounded-lg bg-white px-4 py-3 text-center text-sm text-zinc-500 shadow-sm dark:bg-zinc-900">
+            Nenhuma mensagem nessa conversa ainda. Quando Instagram, Facebook ou WhatsApp enviarem texto, foto, video ou audio, tudo aparece aqui.
+          </div>
+        )}
+        {messages.map((message) => <MediaMessage key={message.id} message={message} />)}
       </div>
 
       <QuickReplyBar
