@@ -4,6 +4,13 @@ create table if not exists chat_conversations (
   organization_id text not null,
   status text not null default 'open',
   assigned_to text,
+  channel text,
+  contact_name text,
+  contact_avatar_url text,
+  contact_phone text,
+  presence_status text,
+  is_typing integer not null default 0,
+  last_seen_at text,
   last_message_at text,
   created_at text not null default (datetime('now')),
   updated_at text not null default (datetime('now'))

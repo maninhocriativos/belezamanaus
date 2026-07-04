@@ -3,11 +3,18 @@ import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "../../services/api";
 
 export type ChatConversation = {
+  channel?: string | null;
+  contact_avatar_url?: string | null;
+  contact_name?: string | null;
+  contact_phone?: string | null;
   id: string;
+  is_typing?: number | null;
   last_message: string | null;
   last_message_at: string | null;
   last_message_type: string | null;
+  last_seen_at?: string | null;
   lead_id: string;
+  presence_status?: string | null;
   sender_type: string | null;
   status: string;
 };
@@ -42,6 +49,10 @@ function titleFromConversation(id: string) {
   if (channel === "instagram") return `Instagram ${identifier}`;
   if (channel === "facebook") return `Facebook ${identifier}`;
   return identifier.replace(/-/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function displayName(item: ChatConversation) {
+  return item.contact_name || titleFromConversation(item.id);
 }
 
 function channelFromConversation(id: string) {
@@ -146,12 +157,16 @@ export function ConversationList({ onSelect, selectedConversationId }: Conversat
             type="button"
           >
             <span className="relative grid size-12 place-items-center rounded-full bg-rosebrand-100 text-base font-semibold text-rosebrand-700">
-              {ChannelIcon ? <ChannelIcon size={19} /> : titleFromConversation(item.id)[0]}
+              {item.contact_avatar_url ? (
+                <img alt={displayName(item)} className="size-12 rounded-full object-cover" src={item.contact_avatar_url} />
+              ) : ChannelIcon ? (
+                <ChannelIcon size={19} />
+              ) : displayName(item)[0]}
               <span className={`absolute bottom-0 right-0 size-3 rounded-full border-2 border-white ${channel.color}`} />
             </span>
             <span className="min-w-0 flex-1 space-y-1">
               <span className="flex items-center justify-between gap-2">
-                <span className="truncate text-sm font-semibold">{titleFromConversation(item.id)}</span>
+                <span className="truncate text-sm font-semibold">{displayName(item)}</span>
                 <span className="shrink-0 text-[11px] text-zinc-500">{formatTime(item.last_message_at)}</span>
               </span>
               <span className="flex items-center justify-between gap-2">

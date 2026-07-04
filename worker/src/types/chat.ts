@@ -10,5 +10,13 @@ export type ChatMessageInput = {
   mediaMimeType?: string;
   mediaSize?: number;
   mediaUrl?: string;
+  conversationMeta?: {
+    avatarUrl?: string;
+    channel?: string;
+    contactName?: string;
+    contactPhone?: string;
+    isTyping?: boolean;
+    presenceStatus?: string;
+  };
   status?: "failed" | "sent";
 };

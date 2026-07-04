@@ -1,7 +1,26 @@
 import { LeadStatusBadge } from "./LeadStatusBadge";
 import { LeadTemperatureBadge } from "./LeadTemperatureBadge";
+import type { ChatConversation } from "./ConversationList";
 
-export function LeadDetailsPanel() {
+type LeadDetailsPanelProps = {
+  conversation?: ChatConversation;
+};
+
+function contactName(conversation?: ChatConversation) {
+  if (!conversation) return "Lead";
+  if (conversation.contact_name) return conversation.contact_name;
+  const [channel, identifier] = conversation.id.includes(":") ? conversation.id.split(":") : ["crm", conversation.id];
+  if (channel === "facebook") return `Facebook ${identifier}`;
+  if (channel === "instagram") return `Instagram ${identifier}`;
+  if (channel === "whatsapp") return `WhatsApp ${identifier}`;
+  return identifier.replace(/-/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function contactInitial(conversation?: ChatConversation) {
+  return contactName(conversation)[0] || "L";
+}
+
+export function LeadDetailsPanel({ conversation }: LeadDetailsPanelProps) {
   function notify(action: string) {
     window.dispatchEvent(new CustomEvent("crm-action", { detail: action }));
   }
@@ -13,12 +32,16 @@ export function LeadDetailsPanel() {
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
         <div className="flex flex-col items-center border-b border-rosebrand-100 pb-5 text-center dark:border-zinc-800">
-          <span className="grid size-20 place-items-center rounded-full bg-rosebrand-100 text-2xl font-bold text-rosebrand-700">M</span>
-          <h4 className="mt-3 font-semibold">Marina Alves</h4>
-          <p className="text-xs text-zinc-500">(92) 99999-0001</p>
+          {conversation?.contact_avatar_url ? (
+            <img alt={contactName(conversation)} className="size-20 rounded-full object-cover" src={conversation.contact_avatar_url} />
+          ) : (
+            <span className="grid size-20 place-items-center rounded-full bg-rosebrand-100 text-2xl font-bold text-rosebrand-700">{contactInitial(conversation)}</span>
+          )}
+          <h4 className="mt-3 font-semibold">{contactName(conversation)}</h4>
+          <p className="text-xs text-zinc-500">{conversation?.contact_phone || conversation?.lead_id || "sem telefone"}</p>
         </div>
         <div className="mt-4 space-y-3 text-sm">
-          <p><strong>Origem:</strong> Meta Leads</p>
+          <p><strong>Origem:</strong> {conversation?.channel || conversation?.sender_type || "Meta Leads"}</p>
           <p><strong>Campanha:</strong> Avaliacao Julho</p>
           <p><strong>Formulario:</strong> Avaliacao gratuita</p>
           <p><strong>Atendente:</strong> Aline</p>

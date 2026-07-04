@@ -4,6 +4,7 @@ export type Env = {
   SUPABASE_ANON_KEY?: string;
   SUPABASE_SERVICE_ROLE_KEY: string;
   META_VERIFY_TOKEN: string;
+  META_INSTAGRAM_ACCOUNT_ID?: string;
   META_PAGE_ID?: string;
   META_PAGE_ACCESS_TOKEN: string;
   META_CONVERSIONS_ACCESS_TOKEN: string;

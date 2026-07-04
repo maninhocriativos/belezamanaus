@@ -1,8 +1,12 @@
 import type { Env } from "../env";
 import { saveMessage } from "./d1";
+import { draftAgentReply } from "./agent-brain";
 
 type InboundMetaMessage = {
   body: string;
+  contactName?: string;
+  contactAvatarUrl?: string;
+  contactPhone?: string;
   conversationId: string;
   externalId?: string;
   leadId: string;
@@ -45,6 +49,16 @@ function normalizeAttachmentType(type: string): InboundMetaMessage["messageType"
 
 function getMessengerPageId(env: Env) {
   return env.META_PAGE_ID || "1256240180895678";
+}
+
+function getInstagramAccountId(env: Env) {
+  return env.META_INSTAGRAM_ACCOUNT_ID || "17841414340853884";
+}
+
+function titleCaseChannel(provider: InboundMetaMessage["provider"]) {
+  if (provider === "facebook") return "Facebook";
+  if (provider === "instagram") return "Instagram";
+  return "WhatsApp";
 }
 
 function extractMessagingMessages(payload: unknown): InboundMetaMessage[] {
@@ -144,20 +158,29 @@ async function persistInboundMessages(messages: InboundMetaMessage[], env: Env) 
   const saved = [];
 
   for (const message of messages) {
-    saved.push(
-      await saveMessage(env.DB, {
-        body: message.body,
-        conversationId: message.conversationId,
-        direction: "inbound",
-        externalMessageId: message.externalId,
-        leadId: message.leadId,
-        mediaMimeType: message.mediaMimeType,
-        mediaUrl: message.mediaUrl,
-        messageType: message.messageType,
-        organizationId: "beleza-manaus",
-        senderType: message.provider
-      })
-    );
+    const profile = message.contactName || message.contactAvatarUrl ? {} : await fetchChannelProfile(env, message.provider, message.leadId);
+    const savedMessage = await saveMessage(env.DB, {
+      body: message.body,
+      conversationId: message.conversationId,
+      conversationMeta: {
+        avatarUrl: message.contactAvatarUrl ?? profile.avatarUrl,
+        channel: message.provider,
+        contactName: message.contactName ?? profile.name ?? `${titleCaseChannel(message.provider)} ${message.leadId}`,
+        contactPhone: message.contactPhone,
+        isTyping: false,
+        presenceStatus: "online"
+      },
+      direction: "inbound",
+      externalMessageId: message.externalId,
+      leadId: message.leadId,
+      mediaMimeType: message.mediaMimeType,
+      mediaUrl: message.mediaUrl,
+      messageType: message.messageType,
+      organizationId: "beleza-manaus",
+      senderType: message.provider
+    });
+    saved.push(savedMessage);
+    await maybeAutoReplyToLead(env, message, savedMessage);
   }
 
   return saved;
@@ -202,6 +225,26 @@ async function sendFacebookOrInstagramMessage(env: Env, recipientId: string, tex
   }
 
   return data as { message_id?: string; recipient_id?: string };
+}
+
+async function fetchChannelProfile(env: Env, provider: InboundMetaMessage["provider"], id: string) {
+  if (provider === "whatsapp") return {};
+
+  const fields = provider === "instagram" ? "name,username,profile_pic" : "first_name,last_name,profile_pic,name";
+  const response = await fetch(`https://graph.facebook.com/v20.0/${id}?fields=${encodeURIComponent(fields)}&access_token=${encodeURIComponent(env.META_PAGE_ACCESS_TOKEN)}`);
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok || typeof data !== "object" || data === null) {
+    return {};
+  }
+
+  const profile = data as { first_name?: string; last_name?: string; name?: string; profile_pic?: string; username?: string };
+  const fullName = [profile.first_name, profile.last_name].filter(Boolean).join(" ").trim();
+
+  return {
+    avatarUrl: profile.profile_pic,
+    name: fullName || profile.name || profile.username
+  };
 }
 
 async function sendWhatsappMessage(env: Env, recipientId: string, text: string) {
@@ -251,10 +294,64 @@ export async function sendOutboundChannelMessage(env: Env, input: { conversation
   return { channel, externalMessageId: undefined, ok: true };
 }
 
+async function maybeAutoReplyToLead(env: Env, message: InboundMetaMessage, savedMessage: Record<string, unknown>) {
+  if (savedMessage.deduped || message.messageType !== "text" || !message.body.trim()) return;
+
+  const draft = await draftAgentReply({ leadId: message.leadId, message: message.body, organizationId: "beleza-manaus" });
+  if (!draft.reply) return;
+
+  try {
+    const sent = await sendOutboundChannelMessage(env, { conversationId: message.conversationId, text: draft.reply });
+    await saveMessage(env.DB, {
+      body: draft.reply,
+      conversationId: message.conversationId,
+      conversationMeta: {
+        avatarUrl: message.contactAvatarUrl,
+        channel: message.provider,
+        contactName: message.contactName ?? `${titleCaseChannel(message.provider)} ${message.leadId}`,
+        contactPhone: message.contactPhone,
+        isTyping: false,
+        presenceStatus: "online"
+      },
+      direction: "outbound",
+      externalMessageId: sent.externalMessageId,
+      leadId: message.leadId,
+      messageType: "text",
+      organizationId: "beleza-manaus",
+      senderType: "agent",
+      status: "sent"
+    });
+  } catch (error) {
+    await saveMessage(env.DB, {
+      body: draft.reply,
+      conversationId: message.conversationId,
+      conversationMeta: {
+        avatarUrl: message.contactAvatarUrl,
+        channel: message.provider,
+        contactName: message.contactName ?? `${titleCaseChannel(message.provider)} ${message.leadId}`,
+        contactPhone: message.contactPhone,
+        isTyping: false,
+        presenceStatus: "online"
+      },
+      direction: "outbound",
+      leadId: message.leadId,
+      messageType: "text",
+      organizationId: "beleza-manaus",
+      senderType: "agent",
+      status: "failed"
+    });
+  }
+}
+
 function getOtherParticipantId(conversation: GraphConversation, pageId: string) {
   const participants = conversation.participants?.data ?? [];
   const otherParticipant = participants.find((participant) => participant.id && participant.id !== pageId);
   return otherParticipant?.id ?? "";
+}
+
+function getOtherParticipant(conversation: GraphConversation, pageId: string) {
+  const participants = conversation.participants?.data ?? [];
+  return participants.find((participant) => participant.id && participant.id !== pageId);
 }
 
 function getGraphMessageType(message: GraphMessage): InboundMetaMessage["messageType"] {
@@ -268,7 +365,7 @@ function getGraphMessageBody(message: GraphMessage, messageType: InboundMetaMess
   if (messageType === "video") return "[video recebido via Facebook]";
   if (messageType === "audio") return "[audio recebido via Facebook]";
   if (messageType === "document") return "[documento recebido via Facebook]";
-  return "[mensagem recebida via Facebook]";
+  return "";
 }
 
 export async function syncMessengerInbox(env: Env) {
@@ -287,7 +384,9 @@ export async function syncMessengerInbox(env: Env) {
   const saved = [];
 
   for (const conversation of conversations) {
-    const otherParticipantId = getOtherParticipantId(conversation, pageId);
+    const otherParticipant = getOtherParticipant(conversation, pageId);
+    const otherParticipantId = otherParticipant?.id ?? getOtherParticipantId(conversation, pageId);
+    const profile = otherParticipantId ? await fetchChannelProfile(env, "facebook", otherParticipantId) : {};
     const messages = conversation.messages?.data ?? [];
 
     for (const graphMessage of messages.reverse()) {
@@ -299,11 +398,20 @@ export async function syncMessengerInbox(env: Env) {
 
       const messageType = getGraphMessageType(graphMessage);
       const attachment = graphMessage.attachments?.data?.[0];
+      const body = getGraphMessageBody(graphMessage, messageType);
+      if (!body) continue;
 
       saved.push(
         await saveMessage(env.DB, {
-          body: getGraphMessageBody(graphMessage, messageType),
+          body,
           conversationId: `facebook:${leadId}`,
+          conversationMeta: {
+            avatarUrl: profile.avatarUrl,
+            channel: "facebook",
+            contactName: profile.name ?? otherParticipant?.name ?? `Facebook ${leadId}`,
+            isTyping: false,
+            presenceStatus: "online"
+          },
           direction: fromId === pageId ? "outbound" : "inbound",
           externalMessageId: graphMessage.id,
           leadId,
@@ -315,6 +423,20 @@ export async function syncMessengerInbox(env: Env) {
           status: "sent"
         })
       );
+
+      const savedMessage = saved[saved.length - 1];
+      if (fromId !== pageId) {
+        await maybeAutoReplyToLead(env, {
+          body,
+          contactAvatarUrl: profile.avatarUrl,
+          contactName: profile.name ?? otherParticipant?.name,
+          conversationId: `facebook:${leadId}`,
+          externalId: graphMessage.id,
+          leadId,
+          messageType,
+          provider: "facebook"
+        }, savedMessage);
+      }
     }
   }
 
@@ -322,6 +444,88 @@ export async function syncMessengerInbox(env: Env) {
     conversations: conversations.length,
     imported: saved.filter((message) => !("deduped" in message)).length,
     pageId,
+    saved: saved.length
+  };
+}
+
+export async function syncInstagramInbox(env: Env) {
+  const accountId = getInstagramAccountId(env);
+  const fields = "id,updated_time,participants.limit(10){id,name,username},messages.limit(20){id,message,from,to,created_time,attachments{mime_type,name,type,image_data}}";
+  const response = await fetch(
+    `https://graph.facebook.com/v20.0/${accountId}/conversations?platform=instagram&fields=${encodeURIComponent(fields)}&limit=25&access_token=${encodeURIComponent(env.META_PAGE_ACCESS_TOKEN)}`
+  );
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    return {
+      accountId,
+      conversations: 0,
+      error: data,
+      imported: 0,
+      saved: 0
+    };
+  }
+
+  const conversations = Array.isArray((data as { data?: unknown[] }).data) ? ((data as { data?: GraphConversation[] }).data ?? []) : [];
+  const saved = [];
+
+  for (const conversation of conversations) {
+    const otherParticipant = getOtherParticipant(conversation, accountId);
+    const otherParticipantId = otherParticipant?.id ?? getOtherParticipantId(conversation, accountId);
+    const messages = conversation.messages?.data ?? [];
+
+    for (const graphMessage of messages.reverse()) {
+      const fromId = graphMessage.from?.id ?? "";
+      const recipientId = graphMessage.to?.data?.find((recipient) => recipient.id !== fromId)?.id ?? "";
+      const leadId = fromId === accountId ? otherParticipantId || recipientId : fromId || otherParticipantId;
+      if (!leadId || !graphMessage.id) continue;
+
+      const messageType = getGraphMessageType(graphMessage);
+      const attachment = graphMessage.attachments?.data?.[0];
+      const body = getGraphMessageBody(graphMessage, messageType).replace("Facebook", "Instagram");
+      if (!body) continue;
+
+      saved.push(
+        await saveMessage(env.DB, {
+          body,
+          conversationId: `instagram:${leadId}`,
+          conversationMeta: {
+            channel: "instagram",
+            contactName: otherParticipant?.name ?? `Instagram ${leadId}`,
+            isTyping: false,
+            presenceStatus: "online"
+          },
+          direction: fromId === accountId ? "outbound" : "inbound",
+          externalMessageId: graphMessage.id,
+          leadId,
+          mediaMimeType: attachment?.mime_type,
+          mediaUrl: attachment?.image_data?.url,
+          messageType,
+          organizationId: "beleza-manaus",
+          senderType: "instagram",
+          status: "sent"
+        })
+      );
+
+      const savedMessage = saved[saved.length - 1];
+      if (fromId !== accountId) {
+        await maybeAutoReplyToLead(env, {
+          body,
+          contactName: otherParticipant?.name,
+          conversationId: `instagram:${leadId}`,
+          externalId: graphMessage.id,
+          leadId,
+          messageType,
+          provider: "instagram"
+        }, savedMessage);
+      }
+    }
+  }
+
+  return {
+    accountId,
+    conversations: conversations.length,
+    imported: saved.filter((message) => !("deduped" in message)).length,
     saved: saved.length
   };
 }

@@ -1,6 +1,6 @@
 import type { Env } from "../env";
 import { listConversations, listMessages, saveMessage } from "../services/d1";
-import { sendOutboundChannelMessage, syncMessengerInbox } from "../services/meta";
+import { sendOutboundChannelMessage, syncInstagramInbox, syncMessengerInbox } from "../services/meta";
 import { normalizeMessage } from "../services/message-normalizer";
 
 export async function handleChat(request: Request, env: Env): Promise<Response> {
@@ -12,7 +12,8 @@ export async function handleChat(request: Request, env: Env): Promise<Response> 
     }
 
     try {
-      return Response.json(await syncMessengerInbox(env));
+      const [facebook, instagram] = await Promise.all([syncMessengerInbox(env), syncInstagramInbox(env)]);
+      return Response.json({ facebook, instagram });
     } catch (error) {
       return Response.json(
         { error: error instanceof Error ? error.message : "Nao foi possivel sincronizar o Messenger." },

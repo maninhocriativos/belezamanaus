@@ -171,8 +171,19 @@ function ChatView() {
   return (
     <section className="grid h-full min-h-0 w-full overflow-hidden border-t border-rosebrand-100 bg-white dark:border-zinc-800 dark:bg-zinc-900 xl:grid-cols-[380px_minmax(0,1fr)_340px]">
       <ConversationList onSelect={setSelectedConversation} selectedConversationId={selectedConversation.id} />
-      <ChatWindow conversationId={selectedConversation.id} leadId={selectedConversation.lead_id} />
-      <LeadDetailsPanel />
+      <ChatWindow
+        contact={{
+          avatarUrl: selectedConversation.contact_avatar_url,
+          channel: selectedConversation.channel,
+          isTyping: selectedConversation.is_typing,
+          name: selectedConversation.contact_name,
+          phone: selectedConversation.contact_phone,
+          presenceStatus: selectedConversation.presence_status
+        }}
+        conversationId={selectedConversation.id}
+        leadId={selectedConversation.lead_id}
+      />
+      <LeadDetailsPanel conversation={selectedConversation} />
     </section>
   );
 }

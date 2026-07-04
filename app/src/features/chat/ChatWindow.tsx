@@ -1,4 +1,4 @@
-import { Bot, CalendarClock, CheckCheck, FileText, Image as ImageIcon, MoreVertical, Paperclip, Phone, Play, Send, Smile, UserPlus, Video } from "lucide-react";
+import { Bot, CalendarClock, CheckCheck, Facebook, FileText, Image as ImageIcon, Instagram, MoreVertical, Paperclip, Phone, Play, Send, Smile, UserPlus, Video } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MessageBubble } from "../../components/ui/MessageBubble";
 import { QuickReplyBar } from "../../components/ui/QuickReplyBar";
@@ -24,6 +24,15 @@ type D1Message = {
   message_type: string;
   providerError?: string;
   status?: string;
+};
+
+type ChatContact = {
+  avatarUrl?: string | null;
+  channel?: string | null;
+  isTyping?: number | null;
+  name?: string | null;
+  phone?: string | null;
+  presenceStatus?: string | null;
 };
 
 const organizationId = "beleza-manaus";
@@ -126,11 +135,37 @@ function MediaMessage({ message }: { message: Message }) {
 }
 
 type ChatWindowProps = {
+  contact: ChatContact;
   conversationId: string;
   leadId: string;
 };
 
-export function ChatWindow({ conversationId, leadId }: ChatWindowProps) {
+function fallbackContactName(conversationId: string) {
+  const [channel, identifier] = conversationId.includes(":") ? conversationId.split(":") : ["chat", conversationId];
+  if (channel === "facebook") return `Facebook ${identifier}`;
+  if (channel === "instagram") return `Instagram ${identifier}`;
+  if (channel === "whatsapp") return `WhatsApp ${identifier}`;
+  return identifier.replace(/-/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function ContactAvatar({ contact, conversationId }: { contact: ChatContact; conversationId: string }) {
+  const name = contact.name || fallbackContactName(conversationId);
+  if (contact.avatarUrl) {
+    return <img alt={name} className="size-11 rounded-full object-cover" src={contact.avatarUrl} />;
+  }
+
+  if (contact.channel === "instagram" || conversationId.startsWith("instagram:")) {
+    return <span className="grid size-11 place-items-center rounded-full bg-rosebrand-100 text-rosebrand-700"><Instagram size={19} /></span>;
+  }
+
+  if (contact.channel === "facebook" || conversationId.startsWith("facebook:")) {
+    return <span className="grid size-11 place-items-center rounded-full bg-rosebrand-100 text-rosebrand-700"><Facebook size={19} /></span>;
+  }
+
+  return <span className="grid size-11 place-items-center rounded-full bg-rosebrand-100 text-base font-semibold text-rosebrand-700">{name[0]}</span>;
+}
+
+export function ChatWindow({ contact, conversationId, leadId }: ChatWindowProps) {
   const [actionMessage, setActionMessage] = useState("Atendimento iniciado via Meta Leads. A agente pode responder ate o humano assumir.");
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState("");
@@ -279,10 +314,12 @@ export function ChatWindow({ conversationId, leadId }: ChatWindowProps) {
     <section className="flex min-h-0 flex-col border-r border-rosebrand-100 bg-[#efeae2] dark:border-zinc-800 dark:bg-zinc-950">
       <header className="flex h-16 items-center justify-between border-b border-rosebrand-100 bg-white px-4 dark:border-zinc-800 dark:bg-zinc-900">
         <div className="flex min-w-0 items-center gap-3">
-          <span className="grid size-11 place-items-center rounded-full bg-rosebrand-100 text-base font-semibold text-rosebrand-700">M</span>
+          <ContactAvatar contact={contact} conversationId={conversationId} />
           <div className="min-w-0">
-            <h3 className="truncate text-sm font-semibold">Marina Alves</h3>
-            <p className="truncate text-xs text-emerald-600">online agora - digitando...</p>
+            <h3 className="truncate text-sm font-semibold">{contact.name || fallbackContactName(conversationId)}</h3>
+            <p className="truncate text-xs text-emerald-600">
+              {contact.isTyping ? "digitando..." : contact.presenceStatus === "online" ? "online agora" : "ultimo contato recente"}
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-1 text-zinc-500">
