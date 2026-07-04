@@ -156,6 +156,82 @@ export async function createLeadFromMetaEvent(payload: unknown, env: Env) {
   };
 }
 
+function getChannelRecipient(conversationId: string) {
+  const separatorIndex = conversationId.indexOf(":");
+  if (separatorIndex < 0) return { channel: "crm", recipientId: conversationId };
+
+  return {
+    channel: conversationId.slice(0, separatorIndex),
+    recipientId: conversationId.slice(separatorIndex + 1)
+  };
+}
+
+async function sendFacebookOrInstagramMessage(env: Env, recipientId: string, text: string) {
+  const response = await fetch(`https://graph.facebook.com/v20.0/me/messages?access_token=${encodeURIComponent(env.META_PAGE_ACCESS_TOKEN)}`, {
+    body: JSON.stringify({
+      messaging_type: "RESPONSE",
+      message: { text },
+      recipient: { id: recipientId }
+    }),
+    headers: { "content-type": "application/json" },
+    method: "POST"
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(JSON.stringify(data));
+  }
+
+  return data as { message_id?: string; recipient_id?: string };
+}
+
+async function sendWhatsappMessage(env: Env, recipientId: string, text: string) {
+  const accessToken = env.WHATSAPP_ACCESS_TOKEN || env.META_PAGE_ACCESS_TOKEN;
+
+  if (!env.META_PHONE_NUMBER_ID || !accessToken) {
+    throw new Error("WhatsApp ainda nao esta configurado. Informe META_PHONE_NUMBER_ID e WHATSAPP_ACCESS_TOKEN depois de conectar o numero.");
+  }
+
+  const response = await fetch(`https://graph.facebook.com/v20.0/${env.META_PHONE_NUMBER_ID}/messages`, {
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: recipientId,
+      type: "text",
+      text: { body: text, preview_url: false }
+    }),
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+      "content-type": "application/json"
+    },
+    method: "POST"
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(JSON.stringify(data));
+  }
+
+  const messages = Array.isArray((data as { messages?: unknown[] }).messages) ? (data as { messages?: Array<{ id?: string }> }).messages : [];
+  return { message_id: messages?.[0]?.id };
+}
+
+export async function sendOutboundChannelMessage(env: Env, input: { conversationId: string; text: string }) {
+  const { channel, recipientId } = getChannelRecipient(input.conversationId);
+
+  if (channel === "facebook" || channel === "instagram") {
+    const data = await sendFacebookOrInstagramMessage(env, recipientId, input.text);
+    return { channel, externalMessageId: data.message_id, ok: true };
+  }
+
+  if (channel === "whatsapp") {
+    const data = await sendWhatsappMessage(env, recipientId, input.text);
+    return { channel, externalMessageId: data.message_id, ok: true };
+  }
+
+  return { channel, externalMessageId: undefined, ok: true };
+}
+
 export async function getAdsInsights(_env: Env) {
   return {
     mode: "placeholder",

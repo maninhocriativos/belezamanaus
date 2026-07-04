@@ -14,11 +14,6 @@ type Message = {
   text: string;
 };
 
-const initialMessages: Message[] = [
-  { id: "1", direction: "in", text: "Oi, vi o anuncio e queria entender se serve para mim.", time: "13:38" },
-  { id: "2", direction: "out", text: "Claro, Marina. Para te orientar melhor, voce busca reduzir medidas em qual regiao?", time: "13:39" }
-];
-
 type D1Message = {
   id: string;
   body: string | null;
@@ -27,6 +22,8 @@ type D1Message = {
   media_mime_type: string | null;
   media_url: string | null;
   message_type: string;
+  providerError?: string;
+  status?: string;
 };
 
 const organizationId = "beleza-manaus";
@@ -135,7 +132,7 @@ type ChatWindowProps = {
 
 export function ChatWindow({ conversationId, leadId }: ChatWindowProps) {
   const [actionMessage, setActionMessage] = useState("Atendimento iniciado via Meta Leads. A agente pode responder ate o humano assumir.");
-  const [messages, setMessages] = useState(initialMessages);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState("");
   const [loadingMessages, setLoadingMessages] = useState(true);
   const [sending, setSending] = useState(false);
@@ -158,7 +155,7 @@ export function ChatWindow({ conversationId, leadId }: ChatWindowProps) {
       .then((data) => {
         if (!active) return;
         const loaded = data.messages.filter((message) => message.body).map(toUiMessage);
-        if (loaded.length > 0) setMessages(loaded);
+        setMessages(loaded);
       })
       .catch(() => setActionMessage("D1 ainda nao respondeu. Mantendo conversa local ate o worker estar publicado."))
       .finally(() => {
@@ -206,13 +203,19 @@ export function ChatWindow({ conversationId, leadId }: ChatWindowProps) {
     };
 
     setSending(true);
+    setActionMessage("Enviando mensagem pelo canal...");
     setMessages((current) => [...current, optimisticMessage]);
     setDraft("");
 
     try {
-      await persistMessage(text, "outbound", "human");
+      const result = await persistMessage(text, "outbound", "human");
+      setActionMessage(
+        result.providerError
+          ? "Mensagem registrada, mas a Meta recusou o envio. Verifique janela de atendimento, token ou permissoes."
+          : "Mensagem enviada e registrada no D1."
+      );
     } catch {
-      setActionMessage("Mensagem ficou local. O D1 sera sincronizado quando o worker responder.");
+      setActionMessage("Nao foi possivel enviar pelo canal. Verifique token, permissao ou janela de atendimento da Meta.");
     } finally {
       setSending(false);
     }

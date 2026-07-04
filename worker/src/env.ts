@@ -7,5 +7,6 @@ export type Env = {
   META_PAGE_ACCESS_TOKEN: string;
   META_CONVERSIONS_ACCESS_TOKEN: string;
   META_PHONE_NUMBER_ID?: string;
+  WHATSAPP_ACCESS_TOKEN?: string;
   APP_ENV: string;
 };

@@ -44,11 +44,11 @@ export async function saveMessage(db: D1Database, message: ChatMessageInput) {
       message.mediaMimeType ?? null,
       message.mediaSize ?? null,
       message.externalMessageId ?? null,
-      "sent"
+      message.status ?? "sent"
     )
     .run();
 
-  return { id, ...message, status: "sent", created_at: new Date().toISOString() };
+  return { id, ...message, status: message.status ?? "sent", created_at: new Date().toISOString() };
 }
 
 export async function saveWebhookLog(db: D1Database, input: { eventType?: string; payload: unknown; provider: string; status: string }) {

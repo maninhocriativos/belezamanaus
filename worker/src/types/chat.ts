@@ -10,4 +10,5 @@ export type ChatMessageInput = {
   mediaMimeType?: string;
   mediaSize?: number;
   mediaUrl?: string;
+  status?: "failed" | "sent";
 };

@@ -21,7 +21,10 @@ import { useEffect } from "react";
 
 export function App() {
   const legalPageKind = getLegalPageKind(window.location.pathname);
-  const [activePage, setActivePage] = useState<AppPage>("dashboard");
+  const [activePage, setActivePageState] = useState<AppPage>(() => {
+    const stored = window.localStorage.getItem("crm_active_page") as AppPage | null;
+    return stored ?? "dashboard";
+  });
   const [session, setSession] = useState<Session | null>(null);
   const [profileComplete, setProfileComplete] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
@@ -54,6 +57,11 @@ export function App() {
     setProfileComplete(false);
     setDemoMode(false);
     setActivePage("dashboard");
+  }
+
+  function setActivePage(page: AppPage) {
+    setActivePageState(page);
+    window.localStorage.setItem("crm_active_page", page);
   }
 
   if (legalPageKind) {
