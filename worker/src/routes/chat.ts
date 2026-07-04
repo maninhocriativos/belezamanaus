@@ -12,11 +12,20 @@ export async function handleChat(request: Request, env: Env): Promise<Response> 
     }
 
     try {
-      const [facebook, instagram] = await Promise.all([syncMessengerInbox(env), syncInstagramInbox(env)]);
-      return Response.json({ facebook, instagram });
+      const channel = url.searchParams.get("channel") ?? "all";
+      const facebook = channel === "all" || channel === "facebook"
+        ? await syncMessengerInbox(env)
+        : { conversations: 0, imported: 0, saved: 0, skipped: true };
+      const instagram = channel === "all" || channel === "instagram"
+        ? await syncInstagramInbox(env)
+        : { conversations: 0, imported: 0, saved: 0, skipped: true };
+      const whatsapp = channel === "all" || channel === "whatsapp"
+        ? { conversations: 0, imported: 0, mode: "webhook_only", saved: 0 }
+        : { conversations: 0, imported: 0, saved: 0, skipped: true };
+      return Response.json({ facebook, instagram, whatsapp });
     } catch (error) {
       return Response.json(
-        { error: error instanceof Error ? error.message : "Nao foi possivel sincronizar o Messenger." },
+        { error: error instanceof Error ? error.message : "Nao foi possivel sincronizar o canal." },
         { status: 502 }
       );
     }

@@ -1,5 +1,5 @@
 import { Archive, Facebook, Instagram, MessageSquarePlus, RefreshCw, Search } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../../services/api";
 
 export type ChatConversation = {
@@ -23,6 +23,8 @@ type ConversationListProps = {
   onSelect: (conversation: ChatConversation) => void;
   selectedConversationId: string;
 };
+
+type ChannelFilter = "all" | "facebook" | "instagram" | "whatsapp";
 
 const fallbackConversations: ChatConversation[] = [
   {
@@ -51,6 +53,13 @@ function titleFromConversation(id: string) {
   return identifier.replace(/-/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+function getConversationChannel(item: ChatConversation): ChannelFilter {
+  if (item.channel === "facebook" || item.id.startsWith("facebook:")) return "facebook";
+  if (item.channel === "instagram" || item.id.startsWith("instagram:")) return "instagram";
+  if (item.channel === "whatsapp" || item.id.startsWith("whatsapp:")) return "whatsapp";
+  return "all";
+}
+
 function displayName(item: ChatConversation) {
   return item.contact_name || titleFromConversation(item.id);
 }
@@ -72,14 +81,19 @@ function previewFromConversation(item: ChatConversation) {
 }
 
 export function ConversationList({ onSelect, selectedConversationId }: ConversationListProps) {
+  const [channelFilter, setChannelFilter] = useState<ChannelFilter>("all");
   const [conversations, setConversations] = useState(fallbackConversations);
+  const [query, setQuery] = useState("");
   const [syncing, setSyncing] = useState(false);
 
   const loadConversations = useCallback(async (selectFirstWhenMissing = false) => {
     const data = await apiFetch<{ conversations: ChatConversation[] }>("/chat/conversations");
     if (data.conversations.length > 0) {
       setConversations(data.conversations);
-      if (selectFirstWhenMissing && !data.conversations.some((conversation) => conversation.id === selectedConversationId)) {
+      const selectedConversation = data.conversations.find((conversation) => conversation.id === selectedConversationId);
+      if (selectedConversation) {
+        onSelect(selectedConversation);
+      } else if (selectFirstWhenMissing) {
         onSelect(data.conversations[0]);
       }
     }
@@ -88,14 +102,14 @@ export function ConversationList({ onSelect, selectedConversationId }: Conversat
   const syncMessenger = useCallback(async (showSpinner = true) => {
     if (showSpinner) setSyncing(true);
     try {
-      await apiFetch("/chat/sync", { method: "POST" });
+      await apiFetch(`/chat/sync?channel=${channelFilter}`, { method: "POST" });
       await loadConversations(true);
     } catch {
       await loadConversations(false).catch(() => setConversations(fallbackConversations));
     } finally {
       if (showSpinner) setSyncing(false);
     }
-  }, [loadConversations]);
+  }, [channelFilter, loadConversations]);
 
   useEffect(() => {
     syncMessenger();
@@ -116,6 +130,15 @@ export function ConversationList({ onSelect, selectedConversationId }: Conversat
     };
   }, [syncMessenger]);
 
+  const visibleConversations = useMemo(() => conversations.filter((item) => {
+    const channel = getConversationChannel(item);
+    const matchesChannel = channelFilter === "all" || channel === channelFilter;
+    const matchesQuery = displayName(item).toLowerCase().includes(query.toLowerCase()) || (item.last_message ?? "").toLowerCase().includes(query.toLowerCase());
+    return matchesChannel && matchesQuery;
+  }), [channelFilter, conversations, query]);
+
+  const syncTitle = channelFilter === "all" ? "Sincronizar canais" : `Sincronizar ${channelFilter}`;
+
   return (
     <aside className="flex min-h-0 flex-col border-r border-rosebrand-100 bg-white dark:border-zinc-800 dark:bg-zinc-950">
       <header className="flex h-16 items-center justify-between border-b border-rosebrand-100 px-4 dark:border-zinc-800">
@@ -127,7 +150,7 @@ export function ConversationList({ onSelect, selectedConversationId }: Conversat
           <button className="rounded-lg p-2 text-zinc-500 hover:bg-rosebrand-50 dark:hover:bg-zinc-900" title="Nova conversa" type="button">
             <MessageSquarePlus size={18} />
           </button>
-          <button className="rounded-lg p-2 text-zinc-500 hover:bg-rosebrand-50 disabled:opacity-60 dark:hover:bg-zinc-900" disabled={syncing} onClick={() => syncMessenger()} title="Sincronizar Messenger" type="button">
+          <button className="rounded-lg p-2 text-zinc-500 hover:bg-rosebrand-50 disabled:opacity-60 dark:hover:bg-zinc-900" disabled={syncing} onClick={() => syncMessenger()} title={syncTitle} type="button">
             <RefreshCw className={syncing ? "animate-spin" : ""} size={18} />
           </button>
           <button className="rounded-lg p-2 text-zinc-500 hover:bg-rosebrand-50 dark:hover:bg-zinc-900" onClick={() => setConversations((current) => current.filter((item) => item.status !== "archived"))} title="Arquivadas" type="button">
@@ -139,12 +162,36 @@ export function ConversationList({ onSelect, selectedConversationId }: Conversat
       <div className="border-b border-rosebrand-100 p-3 dark:border-zinc-800">
         <label className="flex items-center gap-2 rounded-lg bg-rosebrand-50 px-3 py-2 text-sm text-zinc-500 dark:bg-zinc-900">
           <Search size={16} />
-          <input className="min-w-0 flex-1 bg-transparent outline-none" placeholder="Buscar conversa" />
+          <input className="min-w-0 flex-1 bg-transparent outline-none" onChange={(event) => setQuery(event.target.value)} placeholder="Buscar conversa" value={query} />
         </label>
+        <div className="mt-3 grid grid-cols-4 gap-1">
+          {[
+            ["all", "Todos"],
+            ["whatsapp", "WhatsApp"],
+            ["instagram", "Instagram"],
+            ["facebook", "Facebook"]
+          ].map(([value, label]) => (
+            <button
+              className={`rounded-lg border px-2 py-1.5 text-xs font-semibold ${
+                channelFilter === value
+                  ? "border-rosebrand-500 bg-rosebrand-600 text-white"
+                  : "border-rosebrand-100 text-zinc-600 hover:bg-rosebrand-50 dark:border-zinc-800 dark:text-zinc-300"
+              }`}
+              key={value}
+              onClick={() => setChannelFilter(value as ChannelFilter)}
+              type="button"
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {conversations.map((item) => {
+        {visibleConversations.length === 0 && (
+          <div className="px-4 py-6 text-sm text-zinc-500">Nenhuma conversa nesse canal.</div>
+        )}
+        {visibleConversations.map((item) => {
           const channel = channelFromConversation(item.id);
           const ChannelIcon = channel.icon;
           return (

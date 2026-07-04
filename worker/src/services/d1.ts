@@ -18,6 +18,23 @@ export async function listConversations(db: D1Database) {
   return { conversations: results ?? [] };
 }
 
+function channelFromConversationId(conversationId: string) {
+  const separatorIndex = conversationId.indexOf(":");
+  if (separatorIndex < 0) return null;
+  const channel = conversationId.slice(0, separatorIndex);
+  return channel || null;
+}
+
+export async function findRecentOutboundText(db: D1Database, input: { body: string; conversationId: string; minutes?: number }) {
+  const minutes = Math.max(1, input.minutes ?? 5);
+  return db
+    .prepare(
+      "select id, body, status from chat_messages where conversation_id = ? and direction = 'outbound' and body = ? and created_at >= datetime('now', ?) order by created_at desc limit 1"
+    )
+    .bind(input.conversationId, input.body, `-${minutes} minutes`)
+    .first<{ id: string; body: string; status: string }>();
+}
+
 export async function saveMessage(db: D1Database, message: ChatMessageInput) {
   const existing = message.externalMessageId
     ? await db
@@ -36,7 +53,7 @@ export async function saveMessage(db: D1Database, message: ChatMessageInput) {
       message.conversationId,
       message.leadId,
       message.organizationId,
-      message.conversationMeta?.channel ?? message.senderType,
+      message.conversationMeta?.channel ?? channelFromConversationId(message.conversationId),
       message.conversationMeta?.contactName ?? null,
       message.conversationMeta?.avatarUrl ?? null,
       message.conversationMeta?.contactPhone ?? null,

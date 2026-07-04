@@ -1,5 +1,5 @@
 import type { Env } from "../env";
-import { saveMessage } from "./d1";
+import { findRecentOutboundText, saveMessage } from "./d1";
 import { draftAgentReply } from "./agent-brain";
 
 type InboundMetaMessage = {
@@ -19,7 +19,13 @@ type InboundMetaMessage = {
 type GraphConversation = {
   id?: string;
   messages?: { data?: GraphMessage[] };
-  participants?: { data?: Array<{ id?: string; name?: string }> };
+  participants?: { data?: GraphParticipant[] };
+};
+
+type GraphParticipant = {
+  id?: string;
+  name?: string;
+  username?: string;
 };
 
 type GraphMessage = {
@@ -159,13 +165,15 @@ async function persistInboundMessages(messages: InboundMetaMessage[], env: Env) 
 
   for (const message of messages) {
     const profile = message.contactName || message.contactAvatarUrl ? {} : await fetchChannelProfile(env, message.provider, message.leadId);
+    const contactAvatarUrl = message.contactAvatarUrl ?? profile.avatarUrl;
+    const contactName = message.contactName ?? profile.name ?? `${titleCaseChannel(message.provider)} ${message.leadId}`;
     const savedMessage = await saveMessage(env.DB, {
       body: message.body,
       conversationId: message.conversationId,
       conversationMeta: {
-        avatarUrl: message.contactAvatarUrl ?? profile.avatarUrl,
+        avatarUrl: contactAvatarUrl,
         channel: message.provider,
-        contactName: message.contactName ?? profile.name ?? `${titleCaseChannel(message.provider)} ${message.leadId}`,
+        contactName,
         contactPhone: message.contactPhone,
         isTyping: false,
         presenceStatus: "online"
@@ -180,7 +188,7 @@ async function persistInboundMessages(messages: InboundMetaMessage[], env: Env) 
       senderType: message.provider
     });
     saved.push(savedMessage);
-    await maybeAutoReplyToLead(env, message, savedMessage);
+    await maybeAutoReplyToLead(env, { ...message, contactAvatarUrl, contactName }, savedMessage);
   }
 
   return saved;
@@ -208,8 +216,8 @@ function getChannelRecipient(conversationId: string) {
   };
 }
 
-async function sendFacebookOrInstagramMessage(env: Env, recipientId: string, text: string) {
-  const response = await fetch(`https://graph.facebook.com/v20.0/me/messages?access_token=${encodeURIComponent(env.META_PAGE_ACCESS_TOKEN)}`, {
+async function postGraphMessage(endpointId: string, env: Env, recipientId: string, text: string) {
+  const response = await fetch(`https://graph.facebook.com/v20.0/${endpointId}/messages?access_token=${encodeURIComponent(env.META_PAGE_ACCESS_TOKEN)}`, {
     body: JSON.stringify({
       messaging_type: "RESPONSE",
       message: { text },
@@ -227,24 +235,49 @@ async function sendFacebookOrInstagramMessage(env: Env, recipientId: string, tex
   return data as { message_id?: string; recipient_id?: string };
 }
 
+async function sendFacebookOrInstagramMessage(env: Env, channel: string, recipientId: string, text: string) {
+  const endpointIds = channel === "instagram"
+    ? [getInstagramAccountId(env), getMessengerPageId(env), "me"]
+    : [getMessengerPageId(env), "me"];
+  const uniqueEndpointIds = [...new Set(endpointIds.filter(Boolean))];
+  let lastError = "";
+
+  for (const endpointId of uniqueEndpointIds) {
+    try {
+      return await postGraphMessage(endpointId, env, recipientId, text);
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : "Meta recusou o envio.";
+    }
+  }
+
+  throw new Error(lastError || "Meta recusou o envio.");
+}
+
 async function fetchChannelProfile(env: Env, provider: InboundMetaMessage["provider"], id: string) {
   if (provider === "whatsapp") return {};
 
-  const fields = provider === "instagram" ? "name,username,profile_pic" : "first_name,last_name,profile_pic,name";
-  const response = await fetch(`https://graph.facebook.com/v20.0/${id}?fields=${encodeURIComponent(fields)}&access_token=${encodeURIComponent(env.META_PAGE_ACCESS_TOKEN)}`);
-  const data = await response.json().catch(() => ({}));
+  const fieldAttempts = provider === "instagram"
+    ? ["name,username,profile_pic", "name,profile_pic", "username"]
+    : ["first_name,last_name,profile_pic,name"];
 
-  if (!response.ok || typeof data !== "object" || data === null) {
-    return {};
+  for (const fields of fieldAttempts) {
+    const response = await fetch(`https://graph.facebook.com/v20.0/${id}?fields=${encodeURIComponent(fields)}&access_token=${encodeURIComponent(env.META_PAGE_ACCESS_TOKEN)}`);
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok || typeof data !== "object" || data === null) {
+      continue;
+    }
+
+    const profile = data as { first_name?: string; last_name?: string; name?: string; profile_pic?: string; username?: string };
+    const fullName = [profile.first_name, profile.last_name].filter(Boolean).join(" ").trim();
+
+    return {
+      avatarUrl: profile.profile_pic,
+      name: fullName || profile.name || profile.username
+    };
   }
 
-  const profile = data as { first_name?: string; last_name?: string; name?: string; profile_pic?: string; username?: string };
-  const fullName = [profile.first_name, profile.last_name].filter(Boolean).join(" ").trim();
-
-  return {
-    avatarUrl: profile.profile_pic,
-    name: fullName || profile.name || profile.username
-  };
+  return {};
 }
 
 async function sendWhatsappMessage(env: Env, recipientId: string, text: string) {
@@ -282,7 +315,7 @@ export async function sendOutboundChannelMessage(env: Env, input: { conversation
   const { channel, recipientId } = getChannelRecipient(input.conversationId);
 
   if (channel === "facebook" || channel === "instagram") {
-    const data = await sendFacebookOrInstagramMessage(env, recipientId, input.text);
+    const data = await sendFacebookOrInstagramMessage(env, channel, recipientId, input.text);
     return { channel, externalMessageId: data.message_id, ok: true };
   }
 
@@ -299,6 +332,13 @@ async function maybeAutoReplyToLead(env: Env, message: InboundMetaMessage, saved
 
   const draft = await draftAgentReply({ leadId: message.leadId, message: message.body, organizationId: "beleza-manaus" });
   if (!draft.reply) return;
+
+  const recentDuplicate = await findRecentOutboundText(env.DB, {
+    body: draft.reply,
+    conversationId: message.conversationId,
+    minutes: 10
+  });
+  if (recentDuplicate) return;
 
   try {
     const sent = await sendOutboundChannelMessage(env, { conversationId: message.conversationId, text: draft.reply });
@@ -352,6 +392,10 @@ function getOtherParticipantId(conversation: GraphConversation, pageId: string) 
 function getOtherParticipant(conversation: GraphConversation, pageId: string) {
   const participants = conversation.participants?.data ?? [];
   return participants.find((participant) => participant.id && participant.id !== pageId);
+}
+
+function getParticipantName(participant?: GraphParticipant) {
+  return participant?.name || participant?.username;
 }
 
 function getGraphMessageType(message: GraphMessage): InboundMetaMessage["messageType"] {
@@ -472,6 +516,8 @@ export async function syncInstagramInbox(env: Env) {
   for (const conversation of conversations) {
     const otherParticipant = getOtherParticipant(conversation, accountId);
     const otherParticipantId = otherParticipant?.id ?? getOtherParticipantId(conversation, accountId);
+    const profile = otherParticipantId ? await fetchChannelProfile(env, "instagram", otherParticipantId) : {};
+    const contactName = profile.name ?? getParticipantName(otherParticipant) ?? (otherParticipantId ? `Instagram ${otherParticipantId}` : "Instagram");
     const messages = conversation.messages?.data ?? [];
 
     for (const graphMessage of messages.reverse()) {
@@ -490,8 +536,9 @@ export async function syncInstagramInbox(env: Env) {
           body,
           conversationId: `instagram:${leadId}`,
           conversationMeta: {
+            avatarUrl: profile.avatarUrl,
             channel: "instagram",
-            contactName: otherParticipant?.name ?? `Instagram ${leadId}`,
+            contactName,
             isTyping: false,
             presenceStatus: "online"
           },
@@ -511,7 +558,8 @@ export async function syncInstagramInbox(env: Env) {
       if (fromId !== accountId) {
         await maybeAutoReplyToLead(env, {
           body,
-          contactName: otherParticipant?.name,
+          contactAvatarUrl: profile.avatarUrl,
+          contactName,
           conversationId: `instagram:${leadId}`,
           externalId: graphMessage.id,
           leadId,

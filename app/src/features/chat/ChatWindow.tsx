@@ -37,6 +37,21 @@ type ChatContact = {
 
 const organizationId = "beleza-manaus";
 
+function channelFromConversation(conversationId: string, contact: ChatContact) {
+  if (contact.channel === "facebook" || contact.channel === "instagram" || contact.channel === "whatsapp") return contact.channel;
+  if (conversationId.startsWith("facebook:")) return "facebook";
+  if (conversationId.startsWith("instagram:")) return "instagram";
+  if (conversationId.startsWith("whatsapp:")) return "whatsapp";
+  return "crm";
+}
+
+function channelLabel(channel: string) {
+  if (channel === "facebook") return "Facebook";
+  if (channel === "instagram") return "Instagram";
+  if (channel === "whatsapp") return "WhatsApp";
+  return "CRM";
+}
+
 function formatMessageTime(value?: string) {
   const date = value ? new Date(value) : new Date();
   if (Number.isNaN(date.getTime())) {
@@ -166,12 +181,18 @@ function ContactAvatar({ contact, conversationId }: { contact: ChatContact; conv
 }
 
 export function ChatWindow({ contact, conversationId, leadId }: ChatWindowProps) {
-  const [actionMessage, setActionMessage] = useState("Atendimento iniciado via Meta Leads. A agente pode responder ate o humano assumir.");
+  const channel = channelFromConversation(conversationId, contact);
+  const channelName = channelLabel(channel);
+  const [actionMessage, setActionMessage] = useState(`Atendimento iniciado via ${channelName}.`);
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState("");
   const [loadingMessages, setLoadingMessages] = useState(true);
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    setActionMessage(`Atendimento iniciado via ${channelName}.`);
+  }, [channelName, conversationId]);
 
   const loadMessages = useCallback(async (showLoading = false) => {
     if (showLoading) setLoadingMessages(true);
@@ -226,6 +247,14 @@ export function ChatWindow({ contact, conversationId, leadId }: ChatWindowProps)
     return apiFetch<D1Message>("/chat", {
       body: JSON.stringify({
         body: text,
+        conversationMeta: {
+          avatarUrl: contact.avatarUrl,
+          channel,
+          contactName: contact.name,
+          contactPhone: contact.phone,
+          isTyping: false,
+          presenceStatus: contact.presenceStatus ?? "online"
+        },
         conversationId,
         direction,
         leadId,
@@ -258,7 +287,7 @@ export function ChatWindow({ contact, conversationId, leadId }: ChatWindowProps)
     };
 
     setSending(true);
-    setActionMessage("Enviando mensagem pelo canal...");
+    setActionMessage(`Enviando mensagem pelo ${channelName}...`);
     setMessages((current) => [...current, optimisticMessage]);
     setDraft("");
 
@@ -267,10 +296,10 @@ export function ChatWindow({ contact, conversationId, leadId }: ChatWindowProps)
       setActionMessage(
         result.providerError
           ? "Mensagem registrada, mas a Meta recusou o envio. Verifique janela de atendimento, token ou permissoes."
-          : "Mensagem enviada e registrada no D1."
+          : `Mensagem enviada pelo ${channelName} e registrada no D1.`
       );
     } catch {
-      setActionMessage("Nao foi possivel enviar pelo canal. Verifique token, permissao ou janela de atendimento da Meta.");
+      setActionMessage(`Nao foi possivel enviar pelo ${channelName}. Verifique token, permissao ou janela de atendimento.`);
     } finally {
       setSending(false);
     }
@@ -333,11 +362,11 @@ export function ChatWindow({ contact, conversationId, leadId }: ChatWindowProps)
 
       <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto bg-[radial-gradient(circle_at_20%_20%,rgba(255,255,255,0.55)_0_1px,transparent_1px)] p-5">
         <div className="mx-auto mb-3 rounded-lg bg-amber-50 px-3 py-2 text-center text-xs text-amber-800 shadow-sm">
-          {loadingMessages ? "Carregando mensagens do D1..." : actionMessage}
+          {loadingMessages ? `Carregando mensagens do ${channelName}...` : actionMessage}
         </div>
         {!loadingMessages && messages.length === 0 && (
           <div className="mx-auto mt-16 max-w-sm rounded-lg bg-white px-4 py-3 text-center text-sm text-zinc-500 shadow-sm dark:bg-zinc-900">
-            Nenhuma mensagem nessa conversa ainda. Quando Instagram, Facebook ou WhatsApp enviarem texto, foto, video ou audio, tudo aparece aqui.
+            Nenhuma mensagem nessa conversa ainda. Quando o cliente responder pelo {channelName}, texto, foto, video ou audio aparecem aqui.
           </div>
         )}
         {messages.map((message) => <MediaMessage key={message.id} message={message} />)}

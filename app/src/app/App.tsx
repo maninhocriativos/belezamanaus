@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { AppShell } from "../components/layout/AppShell";
 import { AgentSettingsForm } from "../components/ui/AgentSettingsForm";
-import { CampaignPerformanceTable } from "../components/ui/CampaignPerformanceTable";
+import { CampaignPerformanceTable, type CampaignPerformanceRow } from "../components/ui/CampaignPerformanceTable";
 import { ChartCard } from "../components/charts/ChartCard";
 import { ConversationList, type ChatConversation } from "../components/ui/ConversationList";
 import { LeadDetailsPanel } from "../components/ui/LeadDetailsPanel";
@@ -15,9 +15,57 @@ import { getLegalPageKind, LegalPage } from "../features/public/LegalPages";
 import { supabase } from "../lib/supabase";
 import { appEnv } from "../lib/env";
 import { apiFetch } from "../services/api";
-import { getActiveAgentProfile, listCampaigns, listLeads, listProcedures, type CrmLead } from "../services/crm-data";
+import { getActiveAgentProfile, listCampaigns, listLeads, listProcedures, listSales, type CrmAgentProfile, type CrmCampaign, type CrmLead, type CrmProcedure, type CrmSale } from "../services/crm-data";
 import type { AppPage } from "../types/domain";
-import { useEffect } from "react";
+
+function currency(value: number) {
+  return new Intl.NumberFormat("pt-BR", { currency: "BRL", style: "currency" }).format(value);
+}
+
+function dateKey(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toISOString().slice(0, 10);
+}
+
+function shortDay(value: string) {
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value.slice(5);
+  return new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit" }).format(date);
+}
+
+function buildDailyBars(leads: CrmLead[], sales: CrmSale[]) {
+  const totals = new Map<string, number>();
+  for (const lead of leads) {
+    const key = dateKey(lead.created_at);
+    if (key) totals.set(key, (totals.get(key) ?? 0) + 1);
+  }
+  for (const sale of sales) {
+    const key = dateKey(sale.created_at);
+    if (key) totals.set(key, (totals.get(key) ?? 0) + 1);
+  }
+
+  return [...totals.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .slice(-7)
+    .map(([label, value]) => ({ label: shortDay(label), value }));
+}
+
+function buildCampaignRows(campaigns: CrmCampaign[], leads: CrmLead[], sales: CrmSale[]): CampaignPerformanceRow[] {
+  return campaigns.map((campaign) => {
+    const campaignLeads = leads.filter((lead) => (lead.meta_campaign_name ?? lead.source ?? "").toLowerCase() === campaign.name.toLowerCase());
+    const campaignSales = sales.filter((sale) => campaignLeads.some((lead) => lead.id === sale.lead_id));
+    const revenue = campaignSales.reduce((sum, sale) => sum + Number(sale.amount || 0), 0);
+
+    return {
+      campaign: campaign.name,
+      cpl: campaignLeads.length ? "calc. Meta" : "-",
+      leads: campaignLeads.length,
+      roas: revenue > 0 ? "Meta pendente" : "-",
+      sales: campaignSales.length
+    };
+  });
+}
 
 export function App() {
   const legalPageKind = getLegalPageKind(window.location.pathname);
@@ -100,30 +148,32 @@ export function App() {
 }
 
 function DashboardView() {
-  const [leadCount, setLeadCount] = useState<number | null>(null);
-  const [campaignCount, setCampaignCount] = useState<number | null>(null);
-  const [procedureCount, setProcedureCount] = useState<number | null>(null);
+  const [campaigns, setCampaigns] = useState<CrmCampaign[]>([]);
+  const [leads, setLeads] = useState<CrmLead[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [procedures, setProcedures] = useState<CrmProcedure[]>([]);
+  const [sales, setSales] = useState<CrmSale[]>([]);
 
   useEffect(() => {
-    Promise.all([listLeads(), listCampaigns(), listProcedures()])
-      .then(([leads, campaigns, procedures]) => {
-        setLeadCount(leads.length);
-        setCampaignCount(campaigns.length);
-        setProcedureCount(procedures.length);
+    Promise.all([listLeads(), listCampaigns(), listProcedures(), listSales()])
+      .then(([nextLeads, nextCampaigns, nextProcedures, nextSales]) => {
+        setLeads(nextLeads);
+        setCampaigns(nextCampaigns);
+        setProcedures(nextProcedures);
+        setSales(nextSales);
       })
-      .catch(() => {
-        setLeadCount(0);
-        setCampaignCount(0);
-        setProcedureCount(0);
-      });
+      .finally(() => setLoading(false));
   }, []);
 
+  const today = new Date().toISOString().slice(0, 10);
+  const revenue = sales.reduce((sum, sale) => sum + Number(sale.amount || 0), 0);
   const liveMetrics = [
-    { label: "Leads no Supabase", value: leadCount === null ? "..." : String(leadCount), trend: "banco principal" },
-    { label: "Campanhas", value: campaignCount === null ? "..." : String(campaignCount), trend: "Meta/CRM" },
-    { label: "Procedimentos", value: procedureCount === null ? "..." : String(procedureCount), trend: "ativos" },
-    { label: "Mensagens", value: "D1", trend: "banco separado" }
+    { label: "Leads hoje", value: loading ? "..." : String(leads.filter((lead) => dateKey(lead.created_at) === today).length), trend: "Supabase" },
+    { label: "Leads totais", value: loading ? "..." : String(leads.length), trend: "CRM" },
+    { label: "Vendas", value: loading ? "..." : String(sales.length), trend: currency(revenue) },
+    { label: "Procedimentos", value: loading ? "..." : String(procedures.filter((procedure) => procedure.active).length), trend: "ativos" }
   ];
+  const campaignRows = buildCampaignRows(campaigns, leads, sales);
 
   return (
     <>
@@ -134,8 +184,8 @@ function DashboardView() {
       </section>
 
       <section className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
-        <ChartCard title="Leads e vendas por dia" />
-        <CampaignPerformanceTable />
+        <ChartCard bars={buildDailyBars(leads, sales)} title="Leads e vendas por dia" />
+        <CampaignPerformanceTable rows={campaignRows} />
       </section>
     </>
   );
@@ -163,10 +213,13 @@ function ChatView() {
     };
   });
 
-  function setSelectedConversation(conversation: ChatConversation) {
-    setSelectedConversationState(conversation);
-    window.localStorage.setItem("crm_selected_conversation", JSON.stringify(conversation));
-  }
+  const setSelectedConversation = useCallback((conversation: ChatConversation) => {
+    setSelectedConversationState((current) => {
+      if (JSON.stringify(current) === JSON.stringify(conversation)) return current;
+      window.localStorage.setItem("crm_selected_conversation", JSON.stringify(conversation));
+      return conversation;
+    });
+  }, []);
 
   return (
     <section className="grid h-full min-h-0 w-full overflow-hidden border-t border-rosebrand-100 bg-white dark:border-zinc-800 dark:bg-zinc-900 xl:grid-cols-[380px_minmax(0,1fr)_340px]">
@@ -190,23 +243,40 @@ function ChatView() {
 
 function LeadsView() {
   const [leads, setLeads] = useState<CrmLead[]>([]);
+  const [campaignFilter, setCampaignFilter] = useState("");
+  const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [temperatureFilter, setTemperatureFilter] = useState("");
 
   useEffect(() => {
     listLeads()
       .then(setLeads)
+      .catch((fetchError) => setError(fetchError instanceof Error ? fetchError.message : "Nao foi possivel carregar leads."))
       .finally(() => setLoading(false));
   }, []);
+
+  const filteredLeads = leads.filter((lead) => {
+    const campaign = lead.meta_campaign_name ?? lead.source ?? "";
+    const matchesQuery = [lead.full_name, lead.phone ?? ""].join(" ").toLowerCase().includes(query.toLowerCase());
+    const matchesStatus = !statusFilter || lead.status.toLowerCase().includes(statusFilter.toLowerCase());
+    const matchesCampaign = !campaignFilter || campaign.toLowerCase().includes(campaignFilter.toLowerCase());
+    const matchesTemperature = !temperatureFilter || lead.temperature.toLowerCase().includes(temperatureFilter.toLowerCase());
+    return matchesQuery && matchesStatus && matchesCampaign && matchesTemperature;
+  });
 
   return (
     <section className="grid gap-5 xl:grid-cols-[1fr_360px]">
       <div className="rounded-lg border border-rosebrand-100 bg-white p-5 shadow-soft dark:border-zinc-800 dark:bg-zinc-900">
         <h3 className="text-base font-semibold">Leads</h3>
         <div className="mt-4 grid gap-3 md:grid-cols-4">
-          {["Buscar por nome", "Status", "Campanha", "Temperatura"].map((placeholder) => (
-            <input className="rounded-lg border border-rosebrand-100 bg-transparent px-3 py-2 text-sm dark:border-zinc-800" key={placeholder} placeholder={placeholder} />
-          ))}
+          <input className="rounded-lg border border-rosebrand-100 bg-transparent px-3 py-2 text-sm dark:border-zinc-800" onChange={(event) => setQuery(event.target.value)} placeholder="Buscar por nome" value={query} />
+          <input className="rounded-lg border border-rosebrand-100 bg-transparent px-3 py-2 text-sm dark:border-zinc-800" onChange={(event) => setStatusFilter(event.target.value)} placeholder="Status" value={statusFilter} />
+          <input className="rounded-lg border border-rosebrand-100 bg-transparent px-3 py-2 text-sm dark:border-zinc-800" onChange={(event) => setCampaignFilter(event.target.value)} placeholder="Campanha" value={campaignFilter} />
+          <input className="rounded-lg border border-rosebrand-100 bg-transparent px-3 py-2 text-sm dark:border-zinc-800" onChange={(event) => setTemperatureFilter(event.target.value)} placeholder="Temperatura" value={temperatureFilter} />
         </div>
+        {error && <p className="mt-3 rounded-lg bg-rosebrand-50 px-3 py-2 text-sm text-rosebrand-700">{error}</p>}
         <div className="mt-5 overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead className="text-xs text-zinc-500">
@@ -218,7 +288,7 @@ function LeadsView() {
                   <td className="py-3 pr-3 text-zinc-500" colSpan={5}>Carregando leads do Supabase...</td>
                 </tr>
               )}
-              {!loading && leads.map((lead) => (
+              {!loading && filteredLeads.map((lead) => (
                 <tr className="border-t border-rosebrand-50 dark:border-zinc-800" key={lead.id}>
                   <td className="py-3 pr-3 font-medium">{lead.full_name}</td>
                   <td className="py-3 pr-3">{lead.phone}</td>
@@ -227,6 +297,11 @@ function LeadsView() {
                   <td className="py-3 pr-3">{lead.lead_score}</td>
                 </tr>
               ))}
+              {!loading && filteredLeads.length === 0 && (
+                <tr className="border-t border-rosebrand-50 dark:border-zinc-800">
+                  <td className="py-3 pr-3 text-zinc-500" colSpan={5}>Nenhum lead encontrado.</td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -237,53 +312,119 @@ function LeadsView() {
 }
 
 function SalesView() {
+  const [leads, setLeads] = useState<CrmLead[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [procedures, setProcedures] = useState<CrmProcedure[]>([]);
+  const [sales, setSales] = useState<CrmSale[]>([]);
+
+  useEffect(() => {
+    Promise.all([listLeads(), listProcedures(), listSales()])
+      .then(([nextLeads, nextProcedures, nextSales]) => {
+        setLeads(nextLeads);
+        setProcedures(nextProcedures);
+        setSales(nextSales);
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  const total = sales.reduce((sum, sale) => sum + Number(sale.amount || 0), 0);
+
   return (
     <section className="grid gap-5 xl:grid-cols-[0.8fr_1.2fr]">
-      <SaleForm />
+      <SaleForm leads={leads} onCreated={(sale) => setSales((current) => [sale, ...current])} procedures={procedures} />
       <div className="rounded-lg border border-rosebrand-100 bg-white p-5 shadow-soft dark:border-zinc-800 dark:bg-zinc-900">
         <h3 className="text-base font-semibold">Vendas efetuadas</h3>
-        <p className="mt-4 text-3xl font-bold">R$ 18.900,00</p>
-        <p className="mt-1 text-sm text-zinc-500">Total mockado ate conectar Supabase.</p>
+        <p className="mt-4 text-3xl font-bold">{loading ? "..." : currency(total)}</p>
+        <p className="mt-1 text-sm text-zinc-500">{sales.length} vendas registradas no Supabase.</p>
+        <div className="mt-5 overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead className="text-xs text-zinc-500">
+              <tr><th>Procedimento</th><th>Valor</th><th>Pagamento</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+              {!loading && sales.length === 0 && (
+                <tr className="border-t border-rosebrand-50 dark:border-zinc-800">
+                  <td className="py-3 pr-3 text-zinc-500" colSpan={4}>Nenhuma venda registrada ainda.</td>
+                </tr>
+              )}
+              {sales.map((sale) => (
+                <tr className="border-t border-rosebrand-50 dark:border-zinc-800" key={sale.id}>
+                  <td className="py-3 pr-3">{sale.procedure_name}</td>
+                  <td className="py-3 pr-3">{currency(Number(sale.amount || 0))}</td>
+                  <td className="py-3 pr-3">{sale.payment_method ?? "-"}</td>
+                  <td className="py-3 pr-3">{sale.sale_status}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </section>
   );
 }
 
 function CampaignsView() {
+  const [campaigns, setCampaigns] = useState<CrmCampaign[]>([]);
+  const [leads, setLeads] = useState<CrmLead[]>([]);
+  const [sales, setSales] = useState<CrmSale[]>([]);
+
+  useEffect(() => {
+    Promise.all([listCampaigns(), listLeads(), listSales()]).then(([nextCampaigns, nextLeads, nextSales]) => {
+      setCampaigns(nextCampaigns);
+      setLeads(nextLeads);
+      setSales(nextSales);
+    });
+  }, []);
+
+  const rows = buildCampaignRows(campaigns, leads, sales);
+
   return (
     <section className="grid gap-5 xl:grid-cols-[1fr_1fr]">
-      <CampaignPerformanceTable />
-      <ChartCard title="Leads por campanha" />
+      <CampaignPerformanceTable rows={rows} />
+      <ChartCard bars={rows.map((row) => ({ label: row.campaign.slice(0, 10), value: row.leads }))} title="Leads por campanha" />
     </section>
   );
 }
 
 function AdsPerformanceView() {
+  const [campaigns, setCampaigns] = useState<CrmCampaign[]>([]);
+  const [leads, setLeads] = useState<CrmLead[]>([]);
+  const [sales, setSales] = useState<CrmSale[]>([]);
+
+  useEffect(() => {
+    Promise.all([listCampaigns(), listLeads(), listSales()]).then(([nextCampaigns, nextLeads, nextSales]) => {
+      setCampaigns(nextCampaigns);
+      setLeads(nextLeads);
+      setSales(nextSales);
+    });
+  }, []);
+
+  const rows = buildCampaignRows(campaigns, leads, sales);
+
   return (
     <section className="grid gap-5">
-      <CampaignPerformanceTable />
-      <ChartCard title="Conversao por anuncio" />
+      <CampaignPerformanceTable rows={rows} />
+      <ChartCard bars={rows.map((row) => ({ label: row.campaign.slice(0, 10), value: row.sales }))} note="vendas por campanha" title="Conversao por anuncio" />
     </section>
   );
 }
 
 function AgentView() {
-  const [agentName, setAgentName] = useState("Aline");
-  const [agentTone, setAgentTone] = useState("acolhedor, consultivo e objetivo");
-  const [agentMessage, setAgentMessage] = useState("Carregando configuracao da agente...");
+  const [agent, setAgent] = useState<CrmAgentProfile | null>(null);
+  const agentName = agent?.name ?? "Aline";
+  const agentTone = agent?.tone ?? "acolhedor, consultivo e objetivo";
+  const agentMessage = agent?.initial_message ?? "Cadastre a mensagem inicial da agente.";
 
   useEffect(() => {
     getActiveAgentProfile().then((agent) => {
       if (!agent) return;
-      setAgentName(agent.name);
-      setAgentTone(agent.tone ?? "");
-      setAgentMessage(agent.initial_message ?? "");
+      setAgent(agent);
     });
   }, []);
 
   return (
     <section className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
-      <AgentSettingsForm />
+      <AgentSettingsForm agent={agent} onSaved={setAgent} />
       <div className="rounded-lg border border-rosebrand-100 bg-white p-5 shadow-soft dark:border-zinc-800 dark:bg-zinc-900">
         <h3 className="text-base font-semibold">Agente ativa: {agentName}</h3>
         <p className="mt-2 text-sm text-zinc-500">Tom: {agentTone}</p>
@@ -294,11 +435,29 @@ function AgentView() {
 }
 
 function ReportsView() {
+  const [campaigns, setCampaigns] = useState<CrmCampaign[]>([]);
+  const [leads, setLeads] = useState<CrmLead[]>([]);
+  const [sales, setSales] = useState<CrmSale[]>([]);
+
+  useEffect(() => {
+    Promise.all([listCampaigns(), listLeads(), listSales()]).then(([nextCampaigns, nextLeads, nextSales]) => {
+      setCampaigns(nextCampaigns);
+      setLeads(nextLeads);
+      setSales(nextSales);
+    });
+  }, []);
+
+  const rows = buildCampaignRows(campaigns, leads, sales);
+  const bestCampaign = [...rows].sort((a, b) => b.sales - a.sales || b.leads - a.leads)[0];
+  const pendingLeads = leads.filter((lead) => !["sold", "lost"].includes(lead.status)).length;
+  const revenue = sales.reduce((sum, sale) => sum + Number(sale.amount || 0), 0);
+  const conversion = leads.length ? `${((sales.length / leads.length) * 100).toFixed(1)}%` : "0%";
+
   return (
     <section className="grid gap-5 xl:grid-cols-3">
-      <MetricCard label="Melhor campanha" value="Remarketing" trend="4.1x ROAS" />
-      <MetricCard label="Pior campanha" value="Lead Forms" trend="alto CPL" />
-      <MetricCard label="Tempo medio resposta" value="3m 12s" trend="-18%" />
+      <MetricCard label="Melhor campanha" value={bestCampaign?.campaign ?? "-"} trend={`${bestCampaign?.sales ?? 0} vendas`} />
+      <MetricCard label="Leads em aberto" value={String(pendingLeads)} trend={`${leads.length} totais`} />
+      <MetricCard label="Conversao geral" value={conversion} trend={currency(revenue)} />
     </section>
   );
 }
