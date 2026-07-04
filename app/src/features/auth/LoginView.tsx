@@ -170,6 +170,12 @@ export function LoginView({ onDemoAccess }: LoginViewProps) {
         </button>
 
         {message && <p className="mt-4 text-sm text-zinc-600 dark:text-zinc-300">{message}</p>}
+
+        <div className="mt-5 flex flex-wrap justify-center gap-x-4 gap-y-2 border-t border-rosebrand-100 pt-4 text-xs text-zinc-500 dark:border-zinc-800">
+          <a className="hover:text-rosebrand-700" href="/politica-de-privacidade">Privacidade</a>
+          <a className="hover:text-rosebrand-700" href="/termos-de-servico">Termos</a>
+          <a className="hover:text-rosebrand-700" href="/exclusao-de-dados">Exclusao de dados</a>
+        </div>
       </section>
     </main>
   );

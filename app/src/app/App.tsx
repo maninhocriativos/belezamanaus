@@ -11,6 +11,7 @@ import { SaleForm } from "../components/ui/SaleForm";
 import { LoginView } from "../features/auth/LoginView";
 import { OnboardingView } from "../features/auth/OnboardingView";
 import { ChatWindow } from "../features/chat/ChatWindow";
+import { getLegalPageKind, LegalPage } from "../features/public/LegalPages";
 import { supabase } from "../lib/supabase";
 import { appEnv } from "../lib/env";
 import { apiFetch } from "../services/api";
@@ -19,6 +20,7 @@ import type { AppPage } from "../types/domain";
 import { useEffect } from "react";
 
 export function App() {
+  const legalPageKind = getLegalPageKind(window.location.pathname);
   const [activePage, setActivePage] = useState<AppPage>("dashboard");
   const [session, setSession] = useState<Session | null>(null);
   const [profileComplete, setProfileComplete] = useState(false);
@@ -42,6 +44,10 @@ export function App() {
 
     return () => data.subscription.unsubscribe();
   }, []);
+
+  if (legalPageKind) {
+    return <LegalPage kind={legalPageKind} />;
+  }
 
   if (loadingSession) {
     return (
