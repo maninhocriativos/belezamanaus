@@ -189,17 +189,30 @@ export function ChatWindow({ contact, conversationId, leadId }: ChatWindowProps)
   const [loadingMessages, setLoadingMessages] = useState(true);
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const conversationIdRef = useRef(conversationId);
+  const loadRequestRef = useRef(0);
+  const pendingMessagesRef = useRef<Message[]>([]);
 
   useEffect(() => {
+    conversationIdRef.current = conversationId;
+    loadRequestRef.current += 1;
+    pendingMessagesRef.current = [];
+    setMessages([]);
+    setLoadingMessages(true);
     setActionMessage(`Atendimento iniciado via ${channelName}.`);
   }, [channelName, conversationId]);
 
   const loadMessages = useCallback(async (showLoading = false) => {
+    const requestId = ++loadRequestRef.current;
+    const targetConversationId = conversationId;
     if (showLoading) setLoadingMessages(true);
 
-    const data = await apiFetch<{ messages: D1Message[] }>(`/chat?conversationId=${conversationId}`);
+    const data = await apiFetch<{ messages: D1Message[] }>(`/chat?conversationId=${targetConversationId}`);
+    if (requestId !== loadRequestRef.current || targetConversationId !== conversationIdRef.current) return;
+
     const loaded = data.messages.filter((message) => message.body).map(toUiMessage);
-    setMessages(loaded);
+    const pending = pendingMessagesRef.current.filter((message) => !loaded.some((loadedMessage) => loadedMessage.id === message.id));
+    setMessages([...loaded, ...pending]);
   }, [conversationId]);
 
   useEffect(() => {
@@ -288,17 +301,22 @@ export function ChatWindow({ contact, conversationId, leadId }: ChatWindowProps)
 
     setSending(true);
     setActionMessage(`Enviando mensagem pelo ${channelName}...`);
+    pendingMessagesRef.current = [...pendingMessagesRef.current, optimisticMessage];
     setMessages((current) => [...current, optimisticMessage]);
     setDraft("");
 
     try {
       const result = await persistMessage(text, "outbound", "human");
+      const savedMessage = toUiMessage(result);
+      pendingMessagesRef.current = pendingMessagesRef.current.filter((message) => message.id !== optimisticMessage.id);
+      setMessages((current) => current.map((message) => message.id === optimisticMessage.id ? savedMessage : message));
       setActionMessage(
         result.providerError
           ? "Mensagem registrada, mas a Meta recusou o envio. Verifique janela de atendimento, token ou permissoes."
           : `Mensagem enviada pelo ${channelName} e registrada no D1.`
       );
     } catch {
+      pendingMessagesRef.current = pendingMessagesRef.current.filter((message) => message.id !== optimisticMessage.id);
       setActionMessage(`Nao foi possivel enviar pelo ${channelName}. Verifique token, permissao ou janela de atendimento.`);
     } finally {
       setSending(false);

@@ -1,5 +1,5 @@
 import { Archive, Facebook, Instagram, MessageSquarePlus, RefreshCw, Search } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "../../services/api";
 
 export type ChatConversation = {
@@ -85,19 +85,25 @@ export function ConversationList({ onSelect, selectedConversationId }: Conversat
   const [conversations, setConversations] = useState(fallbackConversations);
   const [query, setQuery] = useState("");
   const [syncing, setSyncing] = useState(false);
+  const selectedConversationIdRef = useRef(selectedConversationId);
+
+  useEffect(() => {
+    selectedConversationIdRef.current = selectedConversationId;
+  }, [selectedConversationId]);
 
   const loadConversations = useCallback(async (selectFirstWhenMissing = false) => {
     const data = await apiFetch<{ conversations: ChatConversation[] }>("/chat/conversations");
     if (data.conversations.length > 0) {
       setConversations(data.conversations);
-      const selectedConversation = data.conversations.find((conversation) => conversation.id === selectedConversationId);
+      const currentSelectedId = selectedConversationIdRef.current;
+      const selectedConversation = data.conversations.find((conversation) => conversation.id === currentSelectedId);
       if (selectedConversation) {
         onSelect(selectedConversation);
       } else if (selectFirstWhenMissing) {
         onSelect(data.conversations[0]);
       }
     }
-  }, [onSelect, selectedConversationId]);
+  }, [onSelect]);
 
   const syncMessenger = useCallback(async (showSpinner = true) => {
     if (showSpinner) setSyncing(true);
