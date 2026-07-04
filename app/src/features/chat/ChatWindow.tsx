@@ -1,5 +1,5 @@
 import { Bot, CalendarClock, CheckCheck, FileText, Image as ImageIcon, MoreVertical, Paperclip, Phone, Play, Send, Smile, UserPlus, Video } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { MessageBubble } from "../../components/ui/MessageBubble";
 import { QuickReplyBar } from "../../components/ui/QuickReplyBar";
 import { apiFetch } from "../../services/api";
@@ -136,6 +136,15 @@ export function ChatWindow({ conversationId, leadId }: ChatWindowProps) {
   const [draft, setDraft] = useState("");
   const [loadingMessages, setLoadingMessages] = useState(true);
   const [sending, setSending] = useState(false);
+  const bottomRef = useRef<HTMLDivElement | null>(null);
+
+  const loadMessages = useCallback(async (showLoading = false) => {
+    if (showLoading) setLoadingMessages(true);
+
+    const data = await apiFetch<{ messages: D1Message[] }>(`/chat?conversationId=${conversationId}`);
+    const loaded = data.messages.filter((message) => message.body).map(toUiMessage);
+    setMessages(loaded);
+  }, [conversationId]);
 
   useEffect(() => {
     function handleExternalAction(event: Event) {
@@ -149,23 +158,34 @@ export function ChatWindow({ conversationId, leadId }: ChatWindowProps) {
 
   useEffect(() => {
     let active = true;
-    setLoadingMessages(true);
 
-    apiFetch<{ messages: D1Message[] }>(`/chat?conversationId=${conversationId}`)
-      .then((data) => {
-        if (!active) return;
-        const loaded = data.messages.filter((message) => message.body).map(toUiMessage);
-        setMessages(loaded);
-      })
+    loadMessages(true)
       .catch(() => setActionMessage("D1 ainda nao respondeu. Mantendo conversa local ate o worker estar publicado."))
       .finally(() => {
         if (active) setLoadingMessages(false);
       });
 
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        loadMessages(false).catch(() => undefined);
+      }
+    }, 2000);
+
+    function handleFocus() {
+      loadMessages(false).catch(() => undefined);
+    }
+
+    window.addEventListener("focus", handleFocus);
     return () => {
       active = false;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", handleFocus);
     };
-  }, [conversationId]);
+  }, [conversationId, loadMessages]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages.length]);
 
   async function persistMessage(text: string, direction: "inbound" | "outbound", senderType: "agent" | "human" | "lead") {
     return apiFetch<D1Message>("/chat", {
@@ -284,6 +304,7 @@ export function ChatWindow({ conversationId, leadId }: ChatWindowProps) {
           </div>
         )}
         {messages.map((message) => <MediaMessage key={message.id} message={message} />)}
+        <div ref={bottomRef} />
       </div>
 
       <QuickReplyBar

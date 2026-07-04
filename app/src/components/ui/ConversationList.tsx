@@ -1,5 +1,5 @@
 import { Archive, Facebook, Instagram, MessageSquarePlus, RefreshCw, Search } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "../../services/api";
 
 export type ChatConversation = {
@@ -64,7 +64,7 @@ export function ConversationList({ onSelect, selectedConversationId }: Conversat
   const [conversations, setConversations] = useState(fallbackConversations);
   const [syncing, setSyncing] = useState(false);
 
-  async function loadConversations(selectFirstWhenMissing = false) {
+  const loadConversations = useCallback(async (selectFirstWhenMissing = false) => {
     const data = await apiFetch<{ conversations: ChatConversation[] }>("/chat/conversations");
     if (data.conversations.length > 0) {
       setConversations(data.conversations);
@@ -72,23 +72,38 @@ export function ConversationList({ onSelect, selectedConversationId }: Conversat
         onSelect(data.conversations[0]);
       }
     }
-  }
+  }, [onSelect, selectedConversationId]);
 
-  async function syncMessenger() {
-    setSyncing(true);
+  const syncMessenger = useCallback(async (showSpinner = true) => {
+    if (showSpinner) setSyncing(true);
     try {
       await apiFetch("/chat/sync", { method: "POST" });
       await loadConversations(true);
     } catch {
       await loadConversations(false).catch(() => setConversations(fallbackConversations));
     } finally {
-      setSyncing(false);
+      if (showSpinner) setSyncing(false);
     }
-  }
+  }, [loadConversations]);
 
   useEffect(() => {
     syncMessenger();
-  }, []);
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        syncMessenger(false);
+      }
+    }, 5000);
+
+    function handleFocus() {
+      syncMessenger(false);
+    }
+
+    window.addEventListener("focus", handleFocus);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", handleFocus);
+    };
+  }, [syncMessenger]);
 
   return (
     <aside className="flex min-h-0 flex-col border-r border-rosebrand-100 bg-white dark:border-zinc-800 dark:bg-zinc-950">
@@ -101,7 +116,7 @@ export function ConversationList({ onSelect, selectedConversationId }: Conversat
           <button className="rounded-lg p-2 text-zinc-500 hover:bg-rosebrand-50 dark:hover:bg-zinc-900" title="Nova conversa" type="button">
             <MessageSquarePlus size={18} />
           </button>
-          <button className="rounded-lg p-2 text-zinc-500 hover:bg-rosebrand-50 disabled:opacity-60 dark:hover:bg-zinc-900" disabled={syncing} onClick={syncMessenger} title="Sincronizar Messenger" type="button">
+          <button className="rounded-lg p-2 text-zinc-500 hover:bg-rosebrand-50 disabled:opacity-60 dark:hover:bg-zinc-900" disabled={syncing} onClick={() => syncMessenger()} title="Sincronizar Messenger" type="button">
             <RefreshCw className={syncing ? "animate-spin" : ""} size={18} />
           </button>
           <button className="rounded-lg p-2 text-zinc-500 hover:bg-rosebrand-50 dark:hover:bg-zinc-900" onClick={() => setConversations((current) => current.filter((item) => item.status !== "archived"))} title="Arquivadas" type="button">
