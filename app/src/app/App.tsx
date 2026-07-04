@@ -45,6 +45,17 @@ export function App() {
     return () => data.subscription.unsubscribe();
   }, []);
 
+  async function handleSignOut() {
+    if (supabase) {
+      await supabase.auth.signOut();
+    }
+
+    setSession(null);
+    setProfileComplete(false);
+    setDemoMode(false);
+    setActivePage("dashboard");
+  }
+
   if (legalPageKind) {
     return <LegalPage kind={legalPageKind} />;
   }
@@ -66,7 +77,7 @@ export function App() {
   }
 
   return (
-    <AppShell activePage={activePage} onPageChange={setActivePage}>
+    <AppShell activePage={activePage} onPageChange={setActivePage} onSignOut={handleSignOut}>
       {activePage === "dashboard" && <DashboardView />}
       {activePage === "leads" && <LeadsView />}
       {activePage === "chat" && <ChatView />}
