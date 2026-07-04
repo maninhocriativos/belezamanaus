@@ -1,6 +1,11 @@
-export const fiqonAdapter = {
-  name: "fiqon",
+import type { MessageAdapter } from "./message-adapter";
+
+export const fiqonAdapter: MessageAdapter = {
+  channel: "whatsapp",
+  normalizeInbound() {
+    return [];
+  },
   async sendText() {
-    return { ok: false, reason: "provider-not-configured" };
+    throw new Error("Fiqon nao esta configurado.");
   }
 };

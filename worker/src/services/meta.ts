@@ -1,6 +1,10 @@
 import type { Env } from "../env";
-import { findRecentOutboundText, saveMessage } from "./d1";
+import type { NormalizedMessage } from "../types/chat";
+import { findRecentOutboundText, saveMessage, updateMessageStatus } from "./d1";
 import { draftAgentReply } from "./agent-brain";
+import { normalizeFacebookMessagingPayload } from "./facebook-adapter";
+import { normalizeInstagramMessagingPayload } from "./instagram-adapter";
+import { normalizeWhatsappCloudPayload, sendWhatsappCloudText } from "./whatsapp-cloud-adapter";
 
 type InboundMetaMessage = {
   body: string;
@@ -11,9 +15,13 @@ type InboundMetaMessage = {
   externalId?: string;
   leadId: string;
   mediaMimeType?: string;
+  mediaId?: string;
   mediaUrl?: string;
   messageType: "audio" | "document" | "image" | "text" | "video";
   provider: "facebook" | "instagram" | "whatsapp";
+  rawPayload?: unknown;
+  senderId?: string;
+  senderName?: string;
 };
 
 type GraphConversation = {
@@ -65,6 +73,27 @@ function titleCaseChannel(provider: InboundMetaMessage["provider"]) {
   if (provider === "facebook") return "Facebook";
   if (provider === "instagram") return "Instagram";
   return "WhatsApp";
+}
+
+function fromNormalizedMessage(message: NormalizedMessage): InboundMetaMessage {
+  if (message.channel === "crm") {
+    throw new Error("CRM channel cannot be persisted as inbound Meta message.");
+  }
+
+  return {
+    body: message.body,
+    conversationId: `${message.channel}:${message.externalConversationId}`,
+    externalId: message.externalMessageId,
+    leadId: message.externalConversationId,
+    mediaId: message.mediaId,
+    mediaMimeType: message.mimeType,
+    mediaUrl: message.mediaUrl,
+    messageType: message.messageType,
+    provider: message.channel,
+    rawPayload: message.rawPayload,
+    senderId: message.senderId,
+    senderName: message.senderName
+  };
 }
 
 function extractMessagingMessages(payload: unknown): InboundMetaMessage[] {
@@ -181,10 +210,14 @@ async function persistInboundMessages(messages: InboundMetaMessage[], env: Env) 
       direction: "inbound",
       externalMessageId: message.externalId,
       leadId: message.leadId,
+      mediaId: message.mediaId,
       mediaMimeType: message.mediaMimeType,
       mediaUrl: message.mediaUrl,
       messageType: message.messageType,
       organizationId: "beleza-manaus",
+      rawPayload: message.rawPayload,
+      senderId: message.senderId,
+      senderName: message.senderName,
       senderType: message.provider
     });
     saved.push(savedMessage);
@@ -195,15 +228,64 @@ async function persistInboundMessages(messages: InboundMetaMessage[], env: Env) 
 }
 
 export async function createLeadFromMetaEvent(payload: unknown, env: Env) {
-  const messages = [...extractMessagingMessages(payload), ...extractWhatsappMessages(payload)];
+  const root = asObject(payload);
+  const messagingMessages = root.object === "instagram"
+    ? normalizeInstagramMessagingPayload(payload).map(fromNormalizedMessage)
+    : normalizeFacebookMessagingPayload(payload).map(fromNormalizedMessage);
+  const messages = [...messagingMessages, ...normalizeWhatsappCloudPayload(payload).map(fromNormalizedMessage)];
+  const statusUpdates = await persistStatusUpdates(payload, env);
   const savedMessages = await persistInboundMessages(messages, env);
 
   return {
-    action: savedMessages.length > 0 ? "messages_received" : "lead_received",
-    mode: savedMessages.length > 0 ? "d1_messages" : "lead_placeholder",
+    action: savedMessages.length > 0 || statusUpdates.length > 0 ? "messages_received" : "lead_received",
+    mode: savedMessages.length > 0 || statusUpdates.length > 0 ? "d1_messages" : "lead_placeholder",
     payload,
-    savedMessages
+    savedMessages,
+    statusUpdates
   };
+}
+
+async function persistStatusUpdates(payload: unknown, env: Env) {
+  const root = asObject(payload);
+  const entries = Array.isArray(root.entry) ? root.entry : [];
+  const updates = [];
+
+  for (const entry of entries) {
+    const messaging = Array.isArray(asObject(entry).messaging) ? asObject(entry).messaging as unknown[] : [];
+    for (const event of messaging) {
+      const item = asObject(event);
+      const delivery = asObject(item.delivery);
+      const read = asObject(item.read);
+      const deliveryMids = Array.isArray(delivery.mids) ? delivery.mids : [];
+      for (const mid of deliveryMids) {
+        const updated = await updateMessageStatus(env.DB, { externalMessageId: getText(mid), status: "delivered" });
+        if (updated) updates.push(updated);
+      }
+      if (read.watermark) {
+        const messageId = getText(read.mid);
+        if (messageId) {
+          const updated = await updateMessageStatus(env.DB, { externalMessageId: messageId, status: "read" });
+          if (updated) updates.push(updated);
+        }
+      }
+    }
+
+    const changes = Array.isArray(asObject(entry).changes) ? asObject(entry).changes as unknown[] : [];
+    for (const change of changes) {
+      const value = asObject(asObject(change).value);
+      const statuses = Array.isArray(value.statuses) ? value.statuses as unknown[] : [];
+      for (const rawStatus of statuses) {
+        const status = asObject(rawStatus);
+        const externalMessageId = getText(status.id);
+        const providerStatus = getText(status.status);
+        const normalizedStatus = providerStatus === "read" ? "read" : providerStatus === "delivered" ? "delivered" : providerStatus === "failed" ? "failed" : "sent";
+        const updated = await updateMessageStatus(env.DB, { externalMessageId, status: normalizedStatus });
+        if (updated) updates.push(updated);
+      }
+    }
+  }
+
+  return updates;
 }
 
 function getChannelRecipient(conversationId: string) {
@@ -320,8 +402,8 @@ export async function sendOutboundChannelMessage(env: Env, input: { conversation
   }
 
   if (channel === "whatsapp") {
-    const data = await sendWhatsappMessage(env, recipientId, input.text);
-    return { channel, externalMessageId: data.message_id, ok: true };
+    const data = await sendWhatsappCloudText(env, { conversationId: input.conversationId, recipientId, text: input.text });
+    return { channel, externalMessageId: data.externalMessageId, ok: true };
   }
 
   return { channel, externalMessageId: undefined, ok: true };

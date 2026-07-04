@@ -36,7 +36,12 @@ export async function handleChat(request: Request, env: Env): Promise<Response> 
       return Response.json(await listConversations(env.DB));
     }
 
-    return Response.json(await listMessages(env.DB, url.searchParams.get("conversationId") ?? undefined));
+    return Response.json(await listMessages(env.DB, {
+      beforeCreatedAt: url.searchParams.get("beforeCreatedAt") ?? undefined,
+      beforeId: url.searchParams.get("beforeId") ?? undefined,
+      conversationId: url.searchParams.get("conversationId") ?? undefined,
+      limit: Number(url.searchParams.get("limit") ?? 50)
+    }));
   }
 
   if (request.method === "POST") {

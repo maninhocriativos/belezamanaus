@@ -26,6 +26,11 @@ type D1Message = {
   status?: string;
 };
 
+type MessagesResponse = {
+  messages: D1Message[];
+  nextCursor: { beforeCreatedAt: string; beforeId: string } | null;
+};
+
 type ChatContact = {
   avatarUrl?: string | null;
   channel?: string | null;
@@ -187,17 +192,23 @@ export function ChatWindow({ contact, conversationId, leadId }: ChatWindowProps)
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState("");
   const [loadingMessages, setLoadingMessages] = useState(true);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [nextCursor, setNextCursor] = useState<MessagesResponse["nextCursor"]>(null);
   const [sending, setSending] = useState(false);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const conversationIdRef = useRef(conversationId);
   const loadRequestRef = useRef(0);
   const pendingMessagesRef = useRef<Message[]>([]);
+  const shouldScrollBottomRef = useRef(true);
 
   useEffect(() => {
     conversationIdRef.current = conversationId;
     loadRequestRef.current += 1;
     pendingMessagesRef.current = [];
+    shouldScrollBottomRef.current = true;
     setMessages([]);
+    setNextCursor(null);
     setLoadingMessages(true);
     setActionMessage(`Atendimento iniciado via ${channelName}.`);
   }, [channelName, conversationId]);
@@ -207,13 +218,47 @@ export function ChatWindow({ contact, conversationId, leadId }: ChatWindowProps)
     const targetConversationId = conversationId;
     if (showLoading) setLoadingMessages(true);
 
-    const data = await apiFetch<{ messages: D1Message[] }>(`/chat?conversationId=${targetConversationId}`);
+    const data = await apiFetch<MessagesResponse>(`/chat?conversationId=${targetConversationId}&limit=50`);
     if (requestId !== loadRequestRef.current || targetConversationId !== conversationIdRef.current) return;
 
     const loaded = data.messages.filter((message) => message.body).map(toUiMessage);
     const pending = pendingMessagesRef.current.filter((message) => !loaded.some((loadedMessage) => loadedMessage.id === message.id));
+    shouldScrollBottomRef.current = true;
     setMessages([...loaded, ...pending]);
+    setNextCursor(data.nextCursor);
   }, [conversationId]);
+
+  const loadOlderMessages = useCallback(async () => {
+    if (!nextCursor || loadingOlder) return;
+    const targetConversationId = conversationId;
+    const scrollElement = scrollRef.current;
+    const previousHeight = scrollElement?.scrollHeight ?? 0;
+    setLoadingOlder(true);
+
+    try {
+      const params = new URLSearchParams({
+        beforeCreatedAt: nextCursor.beforeCreatedAt,
+        beforeId: nextCursor.beforeId,
+        conversationId: targetConversationId,
+        limit: "50"
+      });
+      const data = await apiFetch<MessagesResponse>(`/chat?${params.toString()}`);
+      if (targetConversationId !== conversationIdRef.current) return;
+      const older = data.messages.filter((message) => message.body).map(toUiMessage);
+      shouldScrollBottomRef.current = false;
+      setMessages((current) => {
+        const seen = new Set(current.map((message) => message.id));
+        return [...older.filter((message) => !seen.has(message.id)), ...current];
+      });
+      setNextCursor(data.nextCursor);
+      window.requestAnimationFrame(() => {
+        if (!scrollElement) return;
+        scrollElement.scrollTop = scrollElement.scrollHeight - previousHeight;
+      });
+    } finally {
+      setLoadingOlder(false);
+    }
+  }, [conversationId, loadingOlder, nextCursor]);
 
   useEffect(() => {
     function handleExternalAction(event: Event) {
@@ -253,8 +298,16 @@ export function ChatWindow({ contact, conversationId, leadId }: ChatWindowProps)
   }, [conversationId, loadMessages]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    if (shouldScrollBottomRef.current) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    }
   }, [messages.length]);
+
+  function handleScroll() {
+    if (scrollRef.current?.scrollTop === 0) {
+      loadOlderMessages().catch(() => undefined);
+    }
+  }
 
   async function persistMessage(text: string, direction: "inbound" | "outbound", senderType: "agent" | "human" | "lead") {
     return apiFetch<D1Message>("/chat", {
@@ -302,6 +355,7 @@ export function ChatWindow({ contact, conversationId, leadId }: ChatWindowProps)
     setSending(true);
     setActionMessage(`Enviando mensagem pelo ${channelName}...`);
     pendingMessagesRef.current = [...pendingMessagesRef.current, optimisticMessage];
+    shouldScrollBottomRef.current = true;
     setMessages((current) => [...current, optimisticMessage]);
     setDraft("");
 
@@ -378,10 +432,15 @@ export function ChatWindow({ contact, conversationId, leadId }: ChatWindowProps)
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto bg-[radial-gradient(circle_at_20%_20%,rgba(255,255,255,0.55)_0_1px,transparent_1px)] p-5">
+      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto bg-[radial-gradient(circle_at_20%_20%,rgba(255,255,255,0.55)_0_1px,transparent_1px)] p-5" onScroll={handleScroll} ref={scrollRef}>
         <div className="mx-auto mb-3 rounded-lg bg-amber-50 px-3 py-2 text-center text-xs text-amber-800 shadow-sm">
           {loadingMessages ? `Carregando mensagens do ${channelName}...` : actionMessage}
         </div>
+        {loadingOlder && (
+          <div className="mx-auto rounded-lg bg-white px-3 py-1 text-xs text-zinc-500 shadow-sm dark:bg-zinc-900">
+            Carregando historico...
+          </div>
+        )}
         {!loadingMessages && messages.length === 0 && (
           <div className="mx-auto mt-16 max-w-sm rounded-lg bg-white px-4 py-3 text-center text-sm text-zinc-500 shadow-sm dark:bg-zinc-900">
             Nenhuma mensagem nessa conversa ainda. Quando o cliente responder pelo {channelName}, texto, foto, video ou audio aparecem aqui.

@@ -105,28 +105,27 @@ export function ConversationList({ onSelect, selectedConversationId }: Conversat
     }
   }, [onSelect]);
 
-  const syncMessenger = useCallback(async (showSpinner = true) => {
+  const refreshConversations = useCallback(async (showSpinner = true) => {
     if (showSpinner) setSyncing(true);
     try {
-      await apiFetch(`/chat/sync?channel=${channelFilter}`, { method: "POST" });
       await loadConversations(true);
     } catch {
       await loadConversations(false).catch(() => setConversations(fallbackConversations));
     } finally {
       if (showSpinner) setSyncing(false);
     }
-  }, [channelFilter, loadConversations]);
+  }, [loadConversations]);
 
   useEffect(() => {
-    syncMessenger();
+    refreshConversations();
     const interval = window.setInterval(() => {
       if (document.visibilityState === "visible") {
-        syncMessenger(false);
+        refreshConversations(false);
       }
     }, 5000);
 
     function handleFocus() {
-      syncMessenger(false);
+      refreshConversations(false);
     }
 
     window.addEventListener("focus", handleFocus);
@@ -134,7 +133,7 @@ export function ConversationList({ onSelect, selectedConversationId }: Conversat
       window.clearInterval(interval);
       window.removeEventListener("focus", handleFocus);
     };
-  }, [syncMessenger]);
+  }, [refreshConversations]);
 
   const visibleConversations = useMemo(() => conversations.filter((item) => {
     const channel = getConversationChannel(item);
@@ -143,7 +142,7 @@ export function ConversationList({ onSelect, selectedConversationId }: Conversat
     return matchesChannel && matchesQuery;
   }), [channelFilter, conversations, query]);
 
-  const syncTitle = channelFilter === "all" ? "Sincronizar canais" : `Sincronizar ${channelFilter}`;
+  const syncTitle = channelFilter === "all" ? "Atualizar conversas" : `Atualizar ${channelFilter}`;
 
   return (
     <aside className="flex min-h-0 flex-col border-r border-rosebrand-100 bg-white dark:border-zinc-800 dark:bg-zinc-950">
@@ -156,7 +155,7 @@ export function ConversationList({ onSelect, selectedConversationId }: Conversat
           <button className="rounded-lg p-2 text-zinc-500 hover:bg-rosebrand-50 dark:hover:bg-zinc-900" title="Nova conversa" type="button">
             <MessageSquarePlus size={18} />
           </button>
-          <button className="rounded-lg p-2 text-zinc-500 hover:bg-rosebrand-50 disabled:opacity-60 dark:hover:bg-zinc-900" disabled={syncing} onClick={() => syncMessenger()} title={syncTitle} type="button">
+          <button className="rounded-lg p-2 text-zinc-500 hover:bg-rosebrand-50 disabled:opacity-60 dark:hover:bg-zinc-900" disabled={syncing} onClick={() => refreshConversations()} title={syncTitle} type="button">
             <RefreshCw className={syncing ? "animate-spin" : ""} size={18} />
           </button>
           <button className="rounded-lg p-2 text-zinc-500 hover:bg-rosebrand-50 dark:hover:bg-zinc-900" onClick={() => setConversations((current) => current.filter((item) => item.status !== "archived"))} title="Arquivadas" type="button">

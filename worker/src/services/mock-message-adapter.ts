@@ -1,6 +1,11 @@
-export const mockMessageAdapter = {
-  name: "mock",
-  async sendText(body: string) {
-    return { ok: true, externalMessageId: crypto.randomUUID(), body };
+import type { MessageAdapter } from "./message-adapter";
+
+export const mockMessageAdapter: MessageAdapter = {
+  channel: "crm",
+  normalizeInbound() {
+    return [];
+  },
+  async sendText() {
+    return { ok: true, externalMessageId: crypto.randomUUID() };
   }
 };
