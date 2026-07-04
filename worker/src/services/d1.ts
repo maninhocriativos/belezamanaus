@@ -50,3 +50,14 @@ export async function saveMessage(db: D1Database, message: ChatMessageInput) {
 
   return { id, ...message, status: "sent", created_at: new Date().toISOString() };
 }
+
+export async function saveWebhookLog(db: D1Database, input: { eventType?: string; payload: unknown; provider: string; status: string }) {
+  const id = crypto.randomUUID();
+
+  await db
+    .prepare("insert into webhook_logs (id, provider, event_type, payload, status, created_at) values (?, ?, ?, ?, ?, datetime('now'))")
+    .bind(id, input.provider, input.eventType ?? null, JSON.stringify(input.payload).slice(0, 12000), input.status)
+    .run();
+
+  return { id, ...input };
+}
