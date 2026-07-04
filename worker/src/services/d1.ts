@@ -19,6 +19,22 @@ export async function listConversations(db: D1Database) {
 }
 
 export async function saveMessage(db: D1Database, message: ChatMessageInput) {
+  if (message.externalMessageId) {
+    const existing = await db
+      .prepare("select id from chat_messages where external_message_id = ? limit 1")
+      .bind(message.externalMessageId)
+      .first<{ id: string }>();
+
+    if (existing?.id) {
+      await db
+        .prepare("update chat_conversations set last_message_at = datetime('now'), updated_at = datetime('now') where id = ?")
+        .bind(message.conversationId)
+        .run();
+
+      return { id: existing.id, ...message, status: message.status ?? "sent", deduped: true, created_at: new Date().toISOString() };
+    }
+  }
+
   const id = crypto.randomUUID();
   await db
     .prepare(

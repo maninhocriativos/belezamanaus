@@ -1,4 +1,4 @@
-import { Archive, Facebook, Instagram, MessageSquarePlus, Search } from "lucide-react";
+import { Archive, Facebook, Instagram, MessageSquarePlus, RefreshCw, Search } from "lucide-react";
 import { useEffect, useState } from "react";
 import { apiFetch } from "../../services/api";
 
@@ -62,13 +62,32 @@ function previewFromConversation(item: ChatConversation) {
 
 export function ConversationList({ onSelect, selectedConversationId }: ConversationListProps) {
   const [conversations, setConversations] = useState(fallbackConversations);
+  const [syncing, setSyncing] = useState(false);
+
+  async function loadConversations(selectFirstWhenMissing = false) {
+    const data = await apiFetch<{ conversations: ChatConversation[] }>("/chat/conversations");
+    if (data.conversations.length > 0) {
+      setConversations(data.conversations);
+      if (selectFirstWhenMissing && !data.conversations.some((conversation) => conversation.id === selectedConversationId)) {
+        onSelect(data.conversations[0]);
+      }
+    }
+  }
+
+  async function syncMessenger() {
+    setSyncing(true);
+    try {
+      await apiFetch("/chat/sync", { method: "POST" });
+      await loadConversations(true);
+    } catch {
+      await loadConversations(false).catch(() => setConversations(fallbackConversations));
+    } finally {
+      setSyncing(false);
+    }
+  }
 
   useEffect(() => {
-    apiFetch<{ conversations: ChatConversation[] }>("/chat/conversations")
-      .then((data) => {
-        if (data.conversations.length > 0) setConversations(data.conversations);
-      })
-      .catch(() => setConversations(fallbackConversations));
+    syncMessenger();
   }, []);
 
   return (
@@ -82,7 +101,10 @@ export function ConversationList({ onSelect, selectedConversationId }: Conversat
           <button className="rounded-lg p-2 text-zinc-500 hover:bg-rosebrand-50 dark:hover:bg-zinc-900" title="Nova conversa" type="button">
             <MessageSquarePlus size={18} />
           </button>
-          <button className="rounded-lg p-2 text-zinc-500 hover:bg-rosebrand-50 dark:hover:bg-zinc-900" title="Arquivadas" type="button">
+          <button className="rounded-lg p-2 text-zinc-500 hover:bg-rosebrand-50 disabled:opacity-60 dark:hover:bg-zinc-900" disabled={syncing} onClick={syncMessenger} title="Sincronizar Messenger" type="button">
+            <RefreshCw className={syncing ? "animate-spin" : ""} size={18} />
+          </button>
+          <button className="rounded-lg p-2 text-zinc-500 hover:bg-rosebrand-50 dark:hover:bg-zinc-900" onClick={() => setConversations((current) => current.filter((item) => item.status !== "archived"))} title="Arquivadas" type="button">
             <Archive size={18} />
           </button>
         </div>

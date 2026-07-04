@@ -142,15 +142,31 @@ function DashboardView() {
 }
 
 function ChatView() {
-  const [selectedConversation, setSelectedConversation] = useState<ChatConversation>({
-    id: "marina-alves",
-    last_message: "Quero saber sobre avaliacao",
-    last_message_at: new Date().toISOString(),
-    last_message_type: "text",
-    lead_id: "lead-marina-alves",
-    sender_type: "meta",
-    status: "open"
+  const [selectedConversation, setSelectedConversationState] = useState<ChatConversation>(() => {
+    const stored = window.localStorage.getItem("crm_selected_conversation");
+    if (stored) {
+      try {
+        return JSON.parse(stored) as ChatConversation;
+      } catch {
+        window.localStorage.removeItem("crm_selected_conversation");
+      }
+    }
+
+    return {
+      id: "marina-alves",
+      last_message: "Quero saber sobre avaliacao",
+      last_message_at: new Date().toISOString(),
+      last_message_type: "text",
+      lead_id: "lead-marina-alves",
+      sender_type: "meta",
+      status: "open"
+    };
   });
+
+  function setSelectedConversation(conversation: ChatConversation) {
+    setSelectedConversationState(conversation);
+    window.localStorage.setItem("crm_selected_conversation", JSON.stringify(conversation));
+  }
 
   return (
     <section className="grid h-full min-h-0 w-full overflow-hidden border-t border-rosebrand-100 bg-white dark:border-zinc-800 dark:bg-zinc-900 xl:grid-cols-[380px_minmax(0,1fr)_340px]">

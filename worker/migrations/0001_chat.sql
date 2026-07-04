@@ -81,3 +81,4 @@ create table if not exists webhook_logs (
 create index if not exists idx_chat_messages_conversation_created on chat_messages(conversation_id, created_at);
 create index if not exists idx_chat_messages_lead_created on chat_messages(lead_id, created_at);
 create index if not exists idx_chat_messages_org_created on chat_messages(organization_id, created_at);
+create index if not exists idx_chat_messages_external_message_id on chat_messages(external_message_id);

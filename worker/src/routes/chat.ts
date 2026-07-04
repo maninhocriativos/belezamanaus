@@ -1,11 +1,27 @@
 import type { Env } from "../env";
 import { listConversations, listMessages, saveMessage } from "../services/d1";
-import { sendOutboundChannelMessage } from "../services/meta";
+import { sendOutboundChannelMessage, syncMessengerInbox } from "../services/meta";
 import { normalizeMessage } from "../services/message-normalizer";
 
 export async function handleChat(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+
+  if (url.pathname.endsWith("/sync")) {
+    if (request.method !== "POST") {
+      return Response.json({ error: "Method not allowed" }, { status: 405 });
+    }
+
+    try {
+      return Response.json(await syncMessengerInbox(env));
+    } catch (error) {
+      return Response.json(
+        { error: error instanceof Error ? error.message : "Nao foi possivel sincronizar o Messenger." },
+        { status: 502 }
+      );
+    }
+  }
+
   if (request.method === "GET") {
-    const url = new URL(request.url);
     if (url.pathname.endsWith("/conversations")) {
       return Response.json(await listConversations(env.DB));
     }

@@ -12,6 +12,21 @@ type InboundMetaMessage = {
   provider: "facebook" | "instagram" | "whatsapp";
 };
 
+type GraphConversation = {
+  id?: string;
+  messages?: { data?: GraphMessage[] };
+  participants?: { data?: Array<{ id?: string; name?: string }> };
+};
+
+type GraphMessage = {
+  attachments?: { data?: Array<{ image_data?: { url?: string }; mime_type?: string; name?: string; type?: string }> };
+  created_time?: string;
+  from?: { id?: string; name?: string };
+  id?: string;
+  message?: string;
+  to?: { data?: Array<{ id?: string; name?: string }> };
+};
+
 function asObject(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
 }
@@ -26,6 +41,10 @@ function normalizeAttachmentType(type: string): InboundMetaMessage["messageType"
   if (type === "file" || type === "document") return "document";
   if (type === "image") return "image";
   return "text";
+}
+
+function getMessengerPageId(env: Env) {
+  return env.META_PAGE_ID || "1256240180895678";
 }
 
 function extractMessagingMessages(payload: unknown): InboundMetaMessage[] {
@@ -230,6 +249,81 @@ export async function sendOutboundChannelMessage(env: Env, input: { conversation
   }
 
   return { channel, externalMessageId: undefined, ok: true };
+}
+
+function getOtherParticipantId(conversation: GraphConversation, pageId: string) {
+  const participants = conversation.participants?.data ?? [];
+  const otherParticipant = participants.find((participant) => participant.id && participant.id !== pageId);
+  return otherParticipant?.id ?? "";
+}
+
+function getGraphMessageType(message: GraphMessage): InboundMetaMessage["messageType"] {
+  const attachment = message.attachments?.data?.[0];
+  return normalizeAttachmentType(getText(attachment?.type));
+}
+
+function getGraphMessageBody(message: GraphMessage, messageType: InboundMetaMessage["messageType"]) {
+  if (message.message) return message.message;
+  if (messageType === "image") return "[imagem recebida via Facebook]";
+  if (messageType === "video") return "[video recebido via Facebook]";
+  if (messageType === "audio") return "[audio recebido via Facebook]";
+  if (messageType === "document") return "[documento recebido via Facebook]";
+  return "[mensagem recebida via Facebook]";
+}
+
+export async function syncMessengerInbox(env: Env) {
+  const pageId = getMessengerPageId(env);
+  const fields = "id,updated_time,participants.limit(10){id,name},messages.limit(20){id,message,from,to,created_time,attachments{mime_type,name,type,image_data}}";
+  const response = await fetch(
+    `https://graph.facebook.com/v20.0/${pageId}/conversations?fields=${encodeURIComponent(fields)}&limit=25&access_token=${encodeURIComponent(env.META_PAGE_ACCESS_TOKEN)}`
+  );
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(JSON.stringify(data));
+  }
+
+  const conversations = Array.isArray((data as { data?: unknown[] }).data) ? ((data as { data?: GraphConversation[] }).data ?? []) : [];
+  const saved = [];
+
+  for (const conversation of conversations) {
+    const otherParticipantId = getOtherParticipantId(conversation, pageId);
+    const messages = conversation.messages?.data ?? [];
+
+    for (const graphMessage of messages.reverse()) {
+      const fromId = graphMessage.from?.id ?? "";
+      const recipientId = graphMessage.to?.data?.find((recipient) => recipient.id !== fromId)?.id ?? "";
+      const leadId = fromId === pageId ? otherParticipantId || recipientId : fromId || otherParticipantId;
+
+      if (!leadId || !graphMessage.id) continue;
+
+      const messageType = getGraphMessageType(graphMessage);
+      const attachment = graphMessage.attachments?.data?.[0];
+
+      saved.push(
+        await saveMessage(env.DB, {
+          body: getGraphMessageBody(graphMessage, messageType),
+          conversationId: `facebook:${leadId}`,
+          direction: fromId === pageId ? "outbound" : "inbound",
+          externalMessageId: graphMessage.id,
+          leadId,
+          mediaMimeType: attachment?.mime_type,
+          mediaUrl: attachment?.image_data?.url,
+          messageType,
+          organizationId: "beleza-manaus",
+          senderType: "facebook",
+          status: "sent"
+        })
+      );
+    }
+  }
+
+  return {
+    conversations: conversations.length,
+    imported: saved.filter((message) => !("deduped" in message)).length,
+    pageId,
+    saved: saved.length
+  };
 }
 
 export async function getAdsInsights(_env: Env) {
