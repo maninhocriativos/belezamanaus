@@ -23,6 +23,7 @@ Preencher localmente em `.secrets/.env.local`:
 * `META_APP_ID`
 * `META_APP_SECRET`
 * `META_VERIFY_TOKEN`
+* `META_INSTAGRAM_ACCOUNT_ID`
 * `META_PAGE_ACCESS_TOKEN`
 * `META_AD_ACCOUNT_ID`
 * `META_BUSINESS_ID`

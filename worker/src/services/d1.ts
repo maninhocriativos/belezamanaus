@@ -144,7 +144,7 @@ export async function saveMessage(db: D1Database, message: ChatMessageInput) {
     .run();
 
   if (existing?.id) {
-    return { id: existing.id, ...message, status: message.status ?? "sent", deduped: true, created_at: new Date().toISOString() };
+    return { id: existing.id, ...message, failed_reason: message.failedReason ?? null, status: message.status ?? "sent", deduped: true, created_at: new Date().toISOString() };
   }
 
   const id = crypto.randomUUID();
@@ -157,7 +157,7 @@ export async function saveMessage(db: D1Database, message: ChatMessageInput) {
 
   await db
     .prepare(
-      "insert into chat_messages (id, conversation_id, lead_id, organization_id, direction, sender_type, sender_id, sender_name, message_type, body, media_id, media_url, media_mime_type, media_size, audio_transcription, image_description, external_message_id, status, raw_payload, created_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))"
+      "insert into chat_messages (id, conversation_id, lead_id, organization_id, direction, sender_type, sender_id, sender_name, message_type, body, media_id, media_url, media_mime_type, media_size, audio_transcription, image_description, external_message_id, status, raw_payload, failed_reason, created_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))"
     )
     .bind(
       id,
@@ -178,11 +178,12 @@ export async function saveMessage(db: D1Database, message: ChatMessageInput) {
       imageDescription || null,
       message.externalMessageId ?? null,
       message.status ?? "sent",
-      message.rawPayload ? JSON.stringify(message.rawPayload).slice(0, 12000) : null
+      message.rawPayload ? JSON.stringify(message.rawPayload).slice(0, 12000) : null,
+      message.failedReason ?? null
     )
     .run();
 
-  return { id, ...message, status: message.status ?? "sent", created_at: new Date().toISOString() };
+  return { id, ...message, failed_reason: message.failedReason ?? null, status: message.status ?? "sent", created_at: new Date().toISOString() };
 }
 
 export async function updateMessageStatus(db: D1Database, input: { externalMessageId?: string; messageId?: string; status: string }) {

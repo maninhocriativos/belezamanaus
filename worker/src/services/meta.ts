@@ -5,6 +5,7 @@ import { draftAgentReply } from "./agent-brain";
 import { normalizeFacebookMessagingPayload } from "./facebook-adapter";
 import { normalizeInstagramMessagingPayload } from "./instagram-adapter";
 import { normalizeWhatsappCloudPayload, sendWhatsappCloudText } from "./whatsapp-cloud-adapter";
+import { formatProviderError } from "./provider-error";
 
 type InboundMetaMessage = {
   body: string;
@@ -65,8 +66,25 @@ function getMessengerPageId(env: Env) {
   return env.META_PAGE_ID || "1256240180895678";
 }
 
+function requirePageAccessToken(env: Env) {
+  if (!env.META_PAGE_ACCESS_TOKEN) {
+    throw new Error("Meta nao esta configurado. Defina META_PAGE_ACCESS_TOKEN com um Page Access Token valido.");
+  }
+
+  return env.META_PAGE_ACCESS_TOKEN;
+}
+
 function getInstagramAccountId(env: Env) {
-  return env.META_INSTAGRAM_ACCOUNT_ID || "17841414340853884";
+  return env.META_INSTAGRAM_ACCOUNT_ID;
+}
+
+function requireInstagramAccountId(env: Env) {
+  const accountId = getInstagramAccountId(env);
+  if (!accountId) {
+    throw new Error("Instagram nao esta configurado. Defina META_INSTAGRAM_ACCOUNT_ID com o ID da conta profissional conectada a pagina Meta.");
+  }
+
+  return accountId;
 }
 
 function titleCaseChannel(provider: InboundMetaMessage["provider"]) {
@@ -299,13 +317,17 @@ function getChannelRecipient(conversationId: string) {
 }
 
 async function postGraphMessage(endpointId: string, env: Env, recipientId: string, text: string) {
-  const response = await fetch(`https://graph.facebook.com/v20.0/${endpointId}/messages?access_token=${encodeURIComponent(env.META_PAGE_ACCESS_TOKEN)}`, {
+  const accessToken = requirePageAccessToken(env);
+  const response = await fetch(`https://graph.facebook.com/v20.0/${endpointId}/messages?access_token=${encodeURIComponent(accessToken)}`, {
     body: JSON.stringify({
       messaging_type: "RESPONSE",
       message: { text },
       recipient: { id: recipientId }
     }),
-    headers: { "content-type": "application/json" },
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+      "content-type": "application/json"
+    },
     method: "POST"
   });
 
@@ -319,9 +341,9 @@ async function postGraphMessage(endpointId: string, env: Env, recipientId: strin
 
 async function sendFacebookOrInstagramMessage(env: Env, channel: string, recipientId: string, text: string) {
   const endpointIds = channel === "instagram"
-    ? [getInstagramAccountId(env), getMessengerPageId(env), "me"]
+    ? [getMessengerPageId(env), "me", getInstagramAccountId(env)]
     : [getMessengerPageId(env), "me"];
-  const uniqueEndpointIds = [...new Set(endpointIds.filter(Boolean))];
+  const uniqueEndpointIds = [...new Set(endpointIds.filter((endpointId): endpointId is string => Boolean(endpointId)))];
   let lastError = "";
 
   for (const endpointId of uniqueEndpointIds) {
@@ -444,6 +466,7 @@ async function maybeAutoReplyToLead(env: Env, message: InboundMetaMessage, saved
       status: "sent"
     });
   } catch (error) {
+    const failedReason = formatProviderError(error);
     await saveMessage(env.DB, {
       body: draft.reply,
       conversationId: message.conversationId,
@@ -460,6 +483,7 @@ async function maybeAutoReplyToLead(env: Env, message: InboundMetaMessage, saved
       messageType: "text",
       organizationId: "beleza-manaus",
       senderType: "agent",
+      failedReason,
       status: "failed"
     });
   }
@@ -575,7 +599,7 @@ export async function syncMessengerInbox(env: Env) {
 }
 
 export async function syncInstagramInbox(env: Env) {
-  const accountId = getInstagramAccountId(env);
+  const accountId = requireInstagramAccountId(env);
   const fields = "id,updated_time,participants.limit(10){id,name,username},messages.limit(20){id,message,from,to,created_time,attachments{mime_type,name,type,image_data}}";
   const response = await fetch(
     `https://graph.facebook.com/v20.0/${accountId}/conversations?platform=instagram&fields=${encodeURIComponent(fields)}&limit=25&access_token=${encodeURIComponent(env.META_PAGE_ACCESS_TOKEN)}`

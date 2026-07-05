@@ -1,15 +1,18 @@
-import { Bot, CalendarClock, CheckCheck, Facebook, FileText, Image as ImageIcon, Instagram, MoreVertical, Paperclip, Phone, Play, Send, Smile, UserPlus, Video } from "lucide-react";
+import { AlertTriangle, Bot, CalendarClock, CheckCheck, Facebook, FileText, Image as ImageIcon, Instagram, Mic, MoreVertical, Paperclip, Phone, Play, Send, Smile, Sparkles, Square, UserPlus, Video } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MessageBubble } from "../../components/ui/MessageBubble";
 import { QuickReplyBar } from "../../components/ui/QuickReplyBar";
+import { formatManausTime } from "../../lib/time";
 import { apiFetch } from "../../services/api";
 
 type Message = {
   id: string;
   direction: "in" | "out";
+  failedReason?: string | null;
   mediaMimeType?: string | null;
   mediaUrl?: string | null;
   messageType?: string;
+  status?: "delivered" | "failed" | "read" | "sent";
   time: string;
   text: string;
 };
@@ -19,6 +22,7 @@ type D1Message = {
   body: string | null;
   created_at: string;
   direction: "inbound" | "outbound";
+  failed_reason?: string | null;
   media_mime_type: string | null;
   media_url: string | null;
   message_type: string;
@@ -29,6 +33,14 @@ type D1Message = {
 type MessagesResponse = {
   messages: D1Message[];
   nextCursor: { beforeCreatedAt: string; beforeId: string } | null;
+};
+
+type OutboundMediaPayload = {
+  body: string;
+  mediaMimeType?: string;
+  mediaSize?: number;
+  mediaUrl?: string;
+  messageType: "audio" | "document" | "image" | "video";
 };
 
 type ChatContact = {
@@ -58,32 +70,59 @@ function channelLabel(channel: string) {
 }
 
 function formatMessageTime(value?: string) {
-  const date = value ? new Date(value) : new Date();
-  if (Number.isNaN(date.getTime())) {
-    return new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(new Date());
-  }
-
-  return new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(date);
+  return formatManausTime(value);
 }
 
 function toUiMessage(message: D1Message): Message {
   return {
     id: message.id,
     direction: message.direction === "outbound" ? "out" : "in",
+    failedReason: message.failed_reason,
     mediaMimeType: message.media_mime_type,
     mediaUrl: message.media_url,
     messageType: message.message_type,
+    status: message.status === "failed" ? "failed" : message.status === "delivered" ? "delivered" : message.status === "read" ? "read" : "sent",
     text: message.body ?? "",
     time: formatMessageTime(message.created_at)
   };
 }
 
+function providerErrorMessage(providerError?: string) {
+  if (!providerError) return "";
+
+  try {
+    const data = JSON.parse(providerError) as { error?: { message?: string; code?: number; error_subcode?: number } };
+    const message = data.error?.message;
+    if (message) {
+      const code = data.error?.code ? ` codigo ${data.error.code}` : "";
+      const subcode = data.error?.error_subcode ? `/${data.error.error_subcode}` : "";
+      return `${message}${code}${subcode}`;
+    }
+  } catch {
+    // The worker can also return a plain configuration error.
+  }
+
+  return providerError;
+}
+
+function fileMessageType(file: File): OutboundMediaPayload["messageType"] {
+  if (file.type.startsWith("image/")) return "image";
+  if (file.type.startsWith("video/")) return "video";
+  if (file.type.startsWith("audio/")) return "audio";
+  return "document";
+}
+
+function readableFileSize(size: number) {
+  if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
 function MediaMessage({ message }: { message: Message }) {
   const outgoing = message.direction === "out";
-  const shellClass = `max-w-[78%] rounded-lg p-1 shadow-sm ${
+  const shellClass = `max-w-[min(78%,28rem)] rounded-2xl p-1.5 shadow-sm ring-1 ${
     outgoing
-      ? "ml-auto rounded-tr-sm bg-[#dcf8c6] text-zinc-950 dark:bg-emerald-900 dark:text-zinc-50"
-      : "mr-auto rounded-tl-sm bg-white text-zinc-950 dark:bg-zinc-800 dark:text-zinc-50"
+      ? "ml-auto rounded-tr-md bg-gradient-to-br from-rosebrand-600 to-rosebrand-500 text-white ring-rosebrand-400/30"
+      : "mr-auto rounded-tl-md bg-white text-zinc-950 ring-zinc-200/80 dark:bg-zinc-900 dark:text-zinc-50 dark:ring-zinc-800"
   }`;
   const isMetaMedia = message.mediaUrl?.startsWith("meta-media:");
 
@@ -151,7 +190,7 @@ function MediaMessage({ message }: { message: Message }) {
     );
   }
 
-  return <MessageBubble direction={message.direction} text={message.text} time={message.time} />;
+  return <MessageBubble direction={message.direction} failedReason={message.failedReason} status={message.status} text={message.text} time={message.time} />;
 }
 
 type ChatWindowProps = {
@@ -194,9 +233,14 @@ export function ChatWindow({ contact, conversationId, leadId }: ChatWindowProps)
   const [loadingMessages, setLoadingMessages] = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [nextCursor, setNextCursor] = useState<MessagesResponse["nextCursor"]>(null);
+  const [recording, setRecording] = useState(false);
   const [sending, setSending] = useState(false);
+  const [uploadingFiles, setUploadingFiles] = useState(0);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const mediaChunksRef = useRef<Blob[]>([]);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const conversationIdRef = useRef(conversationId);
   const loadRequestRef = useRef(0);
   const pendingMessagesRef = useRef<Message[]>([]);
@@ -309,7 +353,12 @@ export function ChatWindow({ contact, conversationId, leadId }: ChatWindowProps)
     }
   }
 
-  async function persistMessage(text: string, direction: "inbound" | "outbound", senderType: "agent" | "human" | "lead") {
+  async function persistMessage(
+    text: string,
+    direction: "inbound" | "outbound",
+    senderType: "agent" | "human" | "lead",
+    media?: Partial<OutboundMediaPayload>
+  ) {
     return apiFetch<D1Message>("/chat", {
       body: JSON.stringify({
         body: text,
@@ -324,7 +373,10 @@ export function ChatWindow({ contact, conversationId, leadId }: ChatWindowProps)
         conversationId,
         direction,
         leadId,
-      messageType: "text",
+        mediaMimeType: media?.mediaMimeType,
+        mediaSize: media?.mediaSize,
+        mediaUrl: media?.mediaUrl,
+        messageType: media?.messageType ?? "text",
         organizationId,
         senderType
       }),
@@ -366,7 +418,7 @@ export function ChatWindow({ contact, conversationId, leadId }: ChatWindowProps)
       setMessages((current) => current.map((message) => message.id === optimisticMessage.id ? savedMessage : message));
       setActionMessage(
         result.providerError
-          ? "Mensagem registrada, mas a Meta recusou o envio. Verifique janela de atendimento, token ou permissoes."
+          ? `Mensagem registrada, mas a Meta recusou o envio: ${providerErrorMessage(result.providerError)}`
           : `Mensagem enviada pelo ${channelName} e registrada no D1.`
       );
     } catch {
@@ -375,6 +427,98 @@ export function ChatWindow({ contact, conversationId, leadId }: ChatWindowProps)
     } finally {
       setSending(false);
     }
+  }
+
+  async function sendMediaPayload(payload: OutboundMediaPayload) {
+    const optimisticMessage: Message = {
+      id: crypto.randomUUID(),
+      direction: "out",
+      mediaMimeType: payload.mediaMimeType,
+      mediaUrl: payload.mediaUrl,
+      messageType: payload.messageType,
+      status: "sent",
+      text: payload.body,
+      time: formatMessageTime()
+    };
+
+    pendingMessagesRef.current = [...pendingMessagesRef.current, optimisticMessage];
+    shouldScrollBottomRef.current = true;
+    setMessages((current) => [...current, optimisticMessage]);
+    setUploadingFiles((current) => current + 1);
+    setActionMessage(`Enviando ${payload.messageType === "document" ? "arquivo" : payload.messageType} pelo ${channelName}...`);
+
+    try {
+      const result = await persistMessage(payload.body, "outbound", "human", payload);
+      const savedMessage = toUiMessage(result);
+      pendingMessagesRef.current = pendingMessagesRef.current.filter((message) => message.id !== optimisticMessage.id);
+      setMessages((current) => current.map((message) => message.id === optimisticMessage.id ? { ...savedMessage, mediaUrl: payload.mediaUrl ?? savedMessage.mediaUrl } : message));
+      setActionMessage(
+        result.providerError
+          ? `Arquivo registrado, mas a Meta recusou o envio: ${providerErrorMessage(result.providerError)}`
+          : `Arquivo registrado no atendimento. O campo de texto continua liberado para novas mensagens.`
+      );
+    } catch {
+      pendingMessagesRef.current = pendingMessagesRef.current.filter((message) => message.id !== optimisticMessage.id);
+      setMessages((current) => current.map((message) => message.id === optimisticMessage.id ? { ...message, failedReason: "Nao foi possivel registrar este arquivo.", status: "failed" } : message));
+      setActionMessage("Nao foi possivel registrar o arquivo agora.");
+    } finally {
+      setUploadingFiles((current) => Math.max(0, current - 1));
+    }
+  }
+
+  function handleFiles(files: FileList | null) {
+    const selectedFiles = Array.from(files ?? []);
+    if (selectedFiles.length === 0) return;
+    for (const file of selectedFiles) {
+      const messageType = fileMessageType(file);
+      const mediaUrl = URL.createObjectURL(file);
+      sendMediaPayload({
+        body: `${file.name} (${readableFileSize(file.size)})`,
+        mediaMimeType: file.type || "application/octet-stream",
+        mediaSize: file.size,
+        mediaUrl,
+        messageType
+      }).catch(() => undefined);
+    }
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  async function startRecording() {
+    if (recording) return;
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      mediaChunksRef.current = [];
+      mediaRecorderRef.current = recorder;
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) mediaChunksRef.current.push(event.data);
+      };
+      recorder.onstop = () => {
+        const blob = new Blob(mediaChunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        stream.getTracks().forEach((track) => track.stop());
+        setRecording(false);
+        if (blob.size > 0) {
+          const fileName = `audio-${new Date().toISOString().replace(/[:.]/g, "-")}.webm`;
+          sendMediaPayload({
+            body: `${fileName} (${readableFileSize(blob.size)})`,
+            mediaMimeType: blob.type,
+            mediaSize: blob.size,
+            mediaUrl: URL.createObjectURL(blob),
+            messageType: "audio"
+          }).catch(() => undefined);
+        }
+      };
+      recorder.start();
+      setRecording(true);
+      setActionMessage("Gravando audio. O campo de texto continua liberado.");
+    } catch {
+      setActionMessage("Nao consegui acessar o microfone. Verifique a permissao do navegador.");
+    }
+  }
+
+  function stopRecording() {
+    mediaRecorderRef.current?.stop();
   }
 
   async function runAction(label: string, response?: string) {
@@ -412,13 +556,13 @@ export function ChatWindow({ contact, conversationId, leadId }: ChatWindowProps)
   }
 
   return (
-    <section className="flex min-h-0 flex-col border-r border-rosebrand-100 bg-[#efeae2] dark:border-zinc-800 dark:bg-zinc-950">
-      <header className="flex h-16 items-center justify-between border-b border-rosebrand-100 bg-white px-4 dark:border-zinc-800 dark:bg-zinc-900">
+    <section className="flex min-h-0 flex-col border-r border-rosebrand-100 bg-[#fff8fb] dark:border-zinc-800 dark:bg-zinc-950">
+      <header className="flex h-16 items-center justify-between border-b border-rosebrand-100 bg-white/95 px-4 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/95">
         <div className="flex min-w-0 items-center gap-3">
           <ContactAvatar contact={contact} conversationId={conversationId} />
           <div className="min-w-0">
             <h3 className="truncate text-sm font-semibold">{contact.name || fallbackContactName(conversationId)}</h3>
-            <p className="truncate text-xs text-emerald-600">
+            <p className="truncate text-xs font-medium text-emerald-600">
               {contact.isTyping ? "digitando..." : contact.presenceStatus === "online" ? "online agora" : "ultimo contato recente"}
             </p>
           </div>
@@ -432,9 +576,14 @@ export function ChatWindow({ contact, conversationId, leadId }: ChatWindowProps)
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto bg-[radial-gradient(circle_at_20%_20%,rgba(255,255,255,0.55)_0_1px,transparent_1px)] p-5" onScroll={handleScroll} ref={scrollRef}>
-        <div className="mx-auto mb-3 rounded-lg bg-amber-50 px-3 py-2 text-center text-xs text-amber-800 shadow-sm">
-          {loadingMessages ? `Carregando mensagens do ${channelName}...` : actionMessage}
+      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto bg-[linear-gradient(180deg,rgba(255,241,247,0.72),rgba(255,255,255,0.82)),radial-gradient(circle_at_20%_20%,rgba(236,47,134,0.10)_0_1px,transparent_1px)] bg-[length:auto,22px_22px] p-5 dark:bg-[linear-gradient(180deg,rgba(24,24,27,0.94),rgba(9,9,11,0.98)),radial-gradient(circle_at_20%_20%,rgba(236,47,134,0.14)_0_1px,transparent_1px)]" onScroll={handleScroll} ref={scrollRef}>
+        <div className={`mx-auto mb-3 inline-flex max-w-xl items-center gap-2 rounded-full px-3 py-2 text-center text-xs shadow-sm ring-1 ${
+          actionMessage.includes("recusou") || actionMessage.includes("Nao foi possivel")
+            ? "bg-red-50 text-red-700 ring-red-100 dark:bg-red-950/40 dark:text-red-100 dark:ring-red-900"
+            : "bg-white/90 text-zinc-600 ring-rosebrand-100 dark:bg-zinc-900/90 dark:text-zinc-300 dark:ring-zinc-800"
+        }`}>
+          {actionMessage.includes("recusou") || actionMessage.includes("Nao foi possivel") ? <AlertTriangle size={14} /> : <Sparkles size={14} />}
+          <span>{loadingMessages ? `Carregando mensagens do ${channelName}...` : uploadingFiles > 0 ? `${uploadingFiles} arquivo(s) em envio. Voce pode continuar digitando.` : actionMessage}</span>
         </div>
         {loadingOlder && (
           <div className="mx-auto rounded-lg bg-white px-3 py-1 text-xs text-zinc-500 shadow-sm dark:bg-zinc-900">
@@ -442,7 +591,7 @@ export function ChatWindow({ contact, conversationId, leadId }: ChatWindowProps)
           </div>
         )}
         {!loadingMessages && messages.length === 0 && (
-          <div className="mx-auto mt-16 max-w-sm rounded-lg bg-white px-4 py-3 text-center text-sm text-zinc-500 shadow-sm dark:bg-zinc-900">
+          <div className="mx-auto mt-16 max-w-sm rounded-2xl bg-white/95 px-5 py-4 text-center text-sm text-zinc-500 shadow-soft ring-1 ring-rosebrand-100 dark:bg-zinc-900/95 dark:ring-zinc-800">
             Nenhuma mensagem nessa conversa ainda. Quando o cliente responder pelo {channelName}, texto, foto, video ou audio aparecem aqui.
           </div>
         )}
@@ -456,15 +605,26 @@ export function ChatWindow({ contact, conversationId, leadId }: ChatWindowProps)
         }
       />
 
-      <footer className="flex items-end gap-2 border-t border-rosebrand-100 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
+      <footer className="flex items-end gap-2 border-t border-rosebrand-100 bg-white/95 p-3 shadow-[0_-12px_34px_rgba(146,19,75,0.06)] backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/95">
         <button className="grid size-10 place-items-center rounded-full text-zinc-500 hover:bg-rosebrand-50 dark:hover:bg-zinc-800" onClick={() => setDraft((current) => `${current} 🙂`)} type="button" title="Emoji">
           <Smile size={20} />
         </button>
-        <button className="grid size-10 place-items-center rounded-full text-zinc-500 hover:bg-rosebrand-50 dark:hover:bg-zinc-800" onClick={() => runAction("Anexo selecionado. Upload real entra na etapa do provedor de mensagens.")} type="button" title="Anexar">
+        <input
+          accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt"
+          className="hidden"
+          multiple
+          onChange={(event) => handleFiles(event.target.files)}
+          ref={fileInputRef}
+          type="file"
+        />
+        <button className="grid size-10 place-items-center rounded-full text-zinc-500 hover:bg-rosebrand-50 dark:hover:bg-zinc-800" onClick={() => fileInputRef.current?.click()} type="button" title="Anexar foto, video ou arquivo">
           <Paperclip size={18} />
         </button>
+        <button className={`grid size-10 place-items-center rounded-full ${recording ? "bg-red-600 text-white" : "text-zinc-500 hover:bg-rosebrand-50 dark:hover:bg-zinc-800"}`} onClick={recording ? stopRecording : startRecording} type="button" title={recording ? "Parar gravacao" : "Gravar audio"}>
+          {recording ? <Square size={16} /> : <Mic size={18} />}
+        </button>
         <input
-          className="min-h-10 min-w-0 flex-1 rounded-full border border-rosebrand-100 bg-white px-4 py-2 text-sm outline-none focus:border-rosebrand-400 dark:border-zinc-800 dark:bg-zinc-950"
+          className="min-h-11 min-w-0 flex-1 rounded-full border border-rosebrand-100 bg-rosebrand-50/40 px-4 py-2 text-sm outline-none transition focus:border-rosebrand-400 focus:bg-white focus:ring-4 focus:ring-rosebrand-100 dark:border-zinc-800 dark:bg-zinc-950 dark:focus:ring-rosebrand-900/30"
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter") sendMessage();
@@ -472,7 +632,7 @@ export function ChatWindow({ contact, conversationId, leadId }: ChatWindowProps)
           placeholder="Mensagem"
           value={draft}
         />
-        <button className="grid size-10 place-items-center rounded-full bg-rosebrand-600 text-white shadow-soft disabled:opacity-60" disabled={sending} onClick={sendMessage} type="button" title="Enviar">
+        <button className="grid size-11 place-items-center rounded-full bg-rosebrand-600 text-white shadow-soft transition hover:bg-rosebrand-700 disabled:opacity-60" disabled={sending || !draft.trim()} onClick={sendMessage} type="button" title="Enviar mensagem de texto">
           <Send size={18} />
         </button>
       </footer>

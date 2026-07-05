@@ -2,6 +2,12 @@ import type { Env } from "../env";
 import { listConversations, listMessages, saveMessage } from "../services/d1";
 import { sendOutboundChannelMessage, syncInstagramInbox, syncMessengerInbox } from "../services/meta";
 import { normalizeMessage } from "../services/message-normalizer";
+import { formatProviderError } from "../services/provider-error";
+
+function channelFromConversationId(conversationId: string) {
+  const separatorIndex = conversationId.indexOf(":");
+  return separatorIndex > 0 ? conversationId.slice(0, separatorIndex) : "crm";
+}
 
 export async function handleChat(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
@@ -54,13 +60,19 @@ export async function handleChat(request: Request, env: Env): Promise<Response> 
       if (payload.direction === "outbound" && payload.messageType === "text" && payload.body) {
         const result = await sendOutboundChannelMessage(env, { conversationId: payload.conversationId, text: payload.body });
         externalMessageId = result.externalMessageId;
+      } else if (payload.direction === "outbound" && payload.messageType !== "text") {
+        const channel = channelFromConversationId(payload.conversationId);
+        if (channel === "facebook" || channel === "instagram" || channel === "whatsapp") {
+          status = "failed";
+          providerError = "Midia registrada no CRM. Para entregar audio, fotos e arquivos no canal externo, configure um upload publico HTTPS e envio de anexos pela API Meta.";
+        }
       }
     } catch (error) {
       status = "failed";
-      providerError = error instanceof Error ? error.message : "Nao foi possivel enviar a mensagem pelo canal.";
+      providerError = formatProviderError(error);
     }
 
-    const saved = await saveMessage(env.DB, { ...payload, externalMessageId, status });
+    const saved = await saveMessage(env.DB, { ...payload, externalMessageId, failedReason: providerError || undefined, status });
     return Response.json({ ...saved, providerError });
   }
 
