@@ -377,9 +377,7 @@ async function postGraphMessage(endpointId: string, env: Env, recipientId: strin
 }
 
 async function sendFacebookOrInstagramMessage(env: Env, input: { channel: string; conversationId: string; recipientId: string; senderType?: "agent" | "human"; text: string }) {
-  const endpointId = input.channel === "instagram"
-    ? requireInstagramAccountId(env)
-    : getMessengerPageId(env);
+  const endpointId = getMessengerPageId(env);
   const policy = await resolveMessengerPolicy(env, input);
 
   return postGraphMessage(endpointId, env, input.recipientId, input.text, policy);
@@ -639,9 +637,10 @@ export async function syncMessengerInbox(env: Env) {
 
 export async function syncInstagramInbox(env: Env) {
   const accountId = requireInstagramAccountId(env);
+  const pageId = getMessengerPageId(env);
   const fields = "id,updated_time,participants.limit(10){id,name,username},messages.limit(20){id,message,from,to,created_time,attachments{mime_type,name,type,image_data}}";
   const response = await fetch(
-    `https://graph.facebook.com/v20.0/${accountId}/conversations?platform=instagram&fields=${encodeURIComponent(fields)}&limit=25&access_token=${encodeURIComponent(env.META_PAGE_ACCESS_TOKEN)}`
+    `https://graph.facebook.com/v20.0/${pageId}/conversations?platform=instagram&fields=${encodeURIComponent(fields)}&limit=25&access_token=${encodeURIComponent(env.META_PAGE_ACCESS_TOKEN)}`
   );
 
   const data = await response.json().catch(() => ({}));
@@ -651,6 +650,7 @@ export async function syncInstagramInbox(env: Env) {
       conversations: 0,
       error: data,
       imported: 0,
+      pageId,
       saved: 0
     };
   }
@@ -719,6 +719,7 @@ export async function syncInstagramInbox(env: Env) {
     accountId,
     conversations: conversations.length,
     imported: saved.filter((message) => !("deduped" in message)).length,
+    pageId,
     saved: saved.length
   };
 }

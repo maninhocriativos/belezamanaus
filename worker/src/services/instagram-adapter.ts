@@ -59,7 +59,7 @@ export function normalizeInstagramMessagingPayload(payload: unknown): Normalized
 }
 
 export async function sendInstagramText(env: Env, input: SendTextInput) {
-  const endpointId = env.META_INSTAGRAM_ACCOUNT_ID || env.META_PAGE_ID || "me";
+  const endpointId = env.META_PAGE_ID || "me";
   const response = await fetch(`https://graph.facebook.com/v20.0/${endpointId}/messages?access_token=${encodeURIComponent(env.META_PAGE_ACCESS_TOKEN)}`, {
     body: JSON.stringify({
       messaging_type: "RESPONSE",
