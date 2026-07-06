@@ -479,7 +479,7 @@ async function maybeAutoReplyToLead(env: Env, message: InboundMetaMessage, saved
     conversationId: message.conversationId,
     minutes: 10
   });
-  if (recentDuplicate) return;
+  if (recentDuplicate && recentDuplicate.status !== "failed") return;
 
   try {
     const sent = await sendOutboundChannelMessage(env, { conversationId: message.conversationId, senderType: "agent", text: draft.reply });
