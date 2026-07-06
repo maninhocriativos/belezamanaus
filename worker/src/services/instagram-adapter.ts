@@ -13,6 +13,7 @@ export function normalizeInstagramMessagingPayload(payload: unknown): Normalized
       const item = asObject(event);
       const sender = asObject(item.sender);
       const message = asObject(item.message);
+      if (message.is_echo) continue;
       const senderId = getText(sender.id);
       const text = getText(message.text);
       const externalMessageId = getText(message.mid);
