@@ -98,6 +98,8 @@ export async function draftAgentReply(payload: unknown) {
     reply = chosePeriod
       ? "Certo. Para reservar sua data e horario, e necessario o pagamento de 50% do valor da oferta.\n\nVou te transferir agora para uma atendente finalizar sua reserva, confirmar a disponibilidade certinha e enviar as informacoes de pagamento."
       : "Perfeito \uD83D\uDE0A\n\nQual melhor periodo para voce?\n\n1\uFE0F\u20E3 Manha\n2\uFE0F\u20E3 Tarde\n3\uFE0F\u20E3 Noite";
+  } else if (ad) {
+    reply = `Ola! Que bom ter voce por aqui \uD83D\uDE0A\n\nVoce veio do anuncio do ${ad.offer}, nossa oferta especial de reposicao de Vitaminas D + B12.\n\nPosso te passar valor, horarios disponiveis e explicar como funciona o agendamento.\n\nVoce gostaria de atendimento para hoje ou para outro dia?`;
   }
 
   return {
