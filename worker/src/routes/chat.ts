@@ -1,5 +1,5 @@
 import type { Env } from "../env";
-import { listConversations, listMessages, saveMessage } from "../services/d1";
+import { getConversationMetrics, listConversations, listMessages, saveMessage } from "../services/d1";
 import { sendOutboundChannelMessage, syncInstagramInbox, syncMessengerInbox } from "../services/meta";
 import { normalizeMessage } from "../services/message-normalizer";
 import { formatProviderError } from "../services/provider-error";
@@ -38,6 +38,10 @@ export async function handleChat(request: Request, env: Env): Promise<Response> 
   }
 
   if (request.method === "GET") {
+    if (url.pathname.endsWith("/metrics")) {
+      return Response.json(await getConversationMetrics(env.DB));
+    }
+
     if (url.pathname.endsWith("/conversations")) {
       return Response.json(await listConversations(env.DB));
     }

@@ -17,6 +17,11 @@ export type ChatConversation = {
   lead_id: string;
   presence_status?: string | null;
   sender_type: string | null;
+  ad_code?: string | null;
+  first_inbound_at?: string | null;
+  last_inbound_at?: string | null;
+  source_label?: string | null;
+  source_type?: "organic" | "traffic" | string | null;
   status: string;
 };
 
@@ -77,6 +82,11 @@ function previewFromConversation(item: ChatConversation) {
   if (item.last_message_type === "audio") return "Audio recebido";
   if (item.last_message_type === "document") return "Documento recebido";
   return "Nova mensagem";
+}
+
+function sourceLabel(item: ChatConversation) {
+  if (item.source_type === "traffic") return item.ad_code ? `Trafego: ${item.ad_code}` : "Trafego pago";
+  return item.source_label || "Mensagem normal";
 }
 
 export function ConversationList({ onSelect, selectedConversationId }: ConversationListProps) {
@@ -223,7 +233,7 @@ export function ConversationList({ onSelect, selectedConversationId }: Conversat
               <span className="flex items-center justify-between gap-2">
                 <span className="truncate text-xs text-zinc-500">{previewFromConversation(item)}</span>
               </span>
-              <span className="block text-[11px] font-medium text-rosebrand-600">{channel.label} · {item.status}</span>
+              <span className="block text-[11px] font-medium text-rosebrand-600">{channel.label} · {sourceLabel(item)}</span>
             </span>
           </button>
         );

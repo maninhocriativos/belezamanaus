@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
+import { Facebook, Instagram, MessageCircle, Phone } from "lucide-react";
 import { AppShell } from "../components/layout/AppShell";
 import { AgentSettingsForm } from "../components/ui/AgentSettingsForm";
 import { CampaignPerformanceTable, type CampaignPerformanceRow } from "../components/ui/CampaignPerformanceTable";
@@ -66,6 +67,13 @@ function buildCampaignRows(campaigns: CrmCampaign[], leads: CrmLead[], sales: Cr
     };
   });
 }
+
+type ChatMetrics = {
+  channels: Record<string, number>;
+  organic: number;
+  total: number;
+  traffic: number;
+};
 
 export function App() {
   const legalPageKind = getLegalPageKind(window.location.pathname);
@@ -135,7 +143,10 @@ export function App() {
   return (
     <AppShell activePage={activePage} onPageChange={setActivePage} onSignOut={handleSignOut}>
       {activePage === "dashboard" && <DashboardView />}
-      {activePage === "leads" && <LeadsView />}
+      {activePage === "leads" && <LeadsView onOpenConversation={(conversation) => {
+        window.localStorage.setItem("crm_selected_conversation", JSON.stringify(conversation));
+        setActivePage("chat");
+      }} />}
       {activePage === "chat" && <ChatView />}
       {activePage === "sales" && <SalesView />}
       {activePage === "campaigns" && <CampaignsView />}
@@ -149,18 +160,26 @@ export function App() {
 
 function DashboardView() {
   const [campaigns, setCampaigns] = useState<CrmCampaign[]>([]);
+  const [chatMetrics, setChatMetrics] = useState<ChatMetrics | null>(null);
   const [leads, setLeads] = useState<CrmLead[]>([]);
   const [loading, setLoading] = useState(true);
   const [procedures, setProcedures] = useState<CrmProcedure[]>([]);
   const [sales, setSales] = useState<CrmSale[]>([]);
 
   useEffect(() => {
-    Promise.all([listLeads(), listCampaigns(), listProcedures(), listSales()])
-      .then(([nextLeads, nextCampaigns, nextProcedures, nextSales]) => {
+    Promise.all([
+      listLeads(),
+      listCampaigns(),
+      listProcedures(),
+      listSales(),
+      apiFetch<ChatMetrics>("/chat/metrics").catch(() => null)
+    ])
+      .then(([nextLeads, nextCampaigns, nextProcedures, nextSales, nextChatMetrics]) => {
         setLeads(nextLeads);
         setCampaigns(nextCampaigns);
         setProcedures(nextProcedures);
         setSales(nextSales);
+        setChatMetrics(nextChatMetrics);
       })
       .finally(() => setLoading(false));
   }, []);
@@ -168,10 +187,10 @@ function DashboardView() {
   const today = new Date().toISOString().slice(0, 10);
   const revenue = sales.reduce((sum, sale) => sum + Number(sale.amount || 0), 0);
   const liveMetrics = [
-    { label: "Leads hoje", value: loading ? "..." : String(leads.filter((lead) => dateKey(lead.created_at) === today).length), trend: "Supabase" },
-    { label: "Leads totais", value: loading ? "..." : String(leads.length), trend: "CRM" },
-    { label: "Vendas", value: loading ? "..." : String(sales.length), trend: currency(revenue) },
-    { label: "Procedimentos", value: loading ? "..." : String(procedures.filter((procedure) => procedure.active).length), trend: "ativos" }
+    { label: "Usuarios reais", value: loading ? "..." : String(chatMetrics?.total ?? leads.length), trend: "Chat" },
+    { label: "Trafego pago", value: loading ? "..." : String(chatMetrics?.traffic ?? 0), trend: "anuncios" },
+    { label: "Mensagem normal", value: loading ? "..." : String(chatMetrics?.organic ?? 0), trend: "organico" },
+    { label: "Vendas", value: loading ? "..." : String(sales.length), trend: currency(revenue) }
   ];
   const campaignRows = buildCampaignRows(campaigns, leads, sales);
 
@@ -241,72 +260,111 @@ function ChatView() {
   );
 }
 
-function LeadsView() {
-  const [leads, setLeads] = useState<CrmLead[]>([]);
-  const [campaignFilter, setCampaignFilter] = useState("");
+function leadDisplayName(conversation: ChatConversation) {
+  if (conversation.contact_name) return conversation.contact_name;
+  const [channel, identifier] = conversation.id.includes(":") ? conversation.id.split(":") : ["crm", conversation.id];
+  if (channel === "instagram") return `Instagram ${identifier}`;
+  if (channel === "facebook") return `Facebook ${identifier}`;
+  if (channel === "whatsapp") return `WhatsApp ${identifier}`;
+  return identifier.replace(/-/g, " ");
+}
+
+function leadChannelLabel(conversation: ChatConversation) {
+  if (conversation.channel === "instagram" || conversation.id.startsWith("instagram:")) return "Instagram";
+  if (conversation.channel === "facebook" || conversation.id.startsWith("facebook:")) return "Facebook";
+  if (conversation.channel === "whatsapp" || conversation.id.startsWith("whatsapp:")) return "WhatsApp";
+  return "CRM";
+}
+
+function leadSourceLabel(conversation: ChatConversation) {
+  if (conversation.source_type === "traffic") return conversation.ad_code ? `Trafego pago · ${conversation.ad_code}` : "Trafego pago";
+  return conversation.source_label || "Mensagem normal";
+}
+
+function leadChannelIcon(conversation: ChatConversation) {
+  const channel = leadChannelLabel(conversation);
+  if (channel === "Instagram") return Instagram;
+  if (channel === "Facebook") return Facebook;
+  return Phone;
+}
+
+function LeadsView({ onOpenConversation }: { onOpenConversation: (conversation: ChatConversation) => void }) {
+  const [conversations, setConversations] = useState<ChatConversation[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
-  const [temperatureFilter, setTemperatureFilter] = useState("");
+  const [sourceFilter, setSourceFilter] = useState("");
 
   useEffect(() => {
-    listLeads()
-      .then(setLeads)
-      .catch((fetchError) => setError(fetchError instanceof Error ? fetchError.message : "Nao foi possivel carregar leads."))
+    apiFetch<{ conversations: ChatConversation[] }>("/chat/conversations")
+      .then((data) => setConversations(data.conversations.filter((conversation) => {
+        const channel = leadChannelLabel(conversation);
+        return channel === "Instagram" || channel === "Facebook" || channel === "WhatsApp";
+      })))
+      .catch((fetchError) => setError(fetchError instanceof Error ? fetchError.message : "Nao foi possivel carregar usuarios reais."))
       .finally(() => setLoading(false));
   }, []);
 
-  const filteredLeads = leads.filter((lead) => {
-    const campaign = lead.meta_campaign_name ?? lead.source ?? "";
-    const matchesQuery = [lead.full_name, lead.phone ?? ""].join(" ").toLowerCase().includes(query.toLowerCase());
-    const matchesStatus = !statusFilter || lead.status.toLowerCase().includes(statusFilter.toLowerCase());
-    const matchesCampaign = !campaignFilter || campaign.toLowerCase().includes(campaignFilter.toLowerCase());
-    const matchesTemperature = !temperatureFilter || lead.temperature.toLowerCase().includes(temperatureFilter.toLowerCase());
-    return matchesQuery && matchesStatus && matchesCampaign && matchesTemperature;
+  const filteredLeads = conversations.filter((conversation) => {
+    const haystack = [
+      leadDisplayName(conversation),
+      conversation.contact_phone ?? "",
+      conversation.lead_id,
+      leadChannelLabel(conversation),
+      leadSourceLabel(conversation)
+    ].join(" ").toLowerCase();
+    const matchesQuery = haystack.includes(query.toLowerCase());
+    const matchesSource = !sourceFilter || (conversation.source_type ?? "organic") === sourceFilter;
+    return matchesQuery && matchesSource;
   });
 
   return (
-    <section className="grid gap-5 xl:grid-cols-[1fr_360px]">
-      <div className="rounded-lg border border-rosebrand-100 bg-white p-5 shadow-soft dark:border-zinc-800 dark:bg-zinc-900">
-        <h3 className="text-base font-semibold">Leads</h3>
-        <div className="mt-4 grid gap-3 md:grid-cols-4">
-          <input className="rounded-lg border border-rosebrand-100 bg-transparent px-3 py-2 text-sm dark:border-zinc-800" onChange={(event) => setQuery(event.target.value)} placeholder="Buscar por nome" value={query} />
-          <input className="rounded-lg border border-rosebrand-100 bg-transparent px-3 py-2 text-sm dark:border-zinc-800" onChange={(event) => setStatusFilter(event.target.value)} placeholder="Status" value={statusFilter} />
-          <input className="rounded-lg border border-rosebrand-100 bg-transparent px-3 py-2 text-sm dark:border-zinc-800" onChange={(event) => setCampaignFilter(event.target.value)} placeholder="Campanha" value={campaignFilter} />
-          <input className="rounded-lg border border-rosebrand-100 bg-transparent px-3 py-2 text-sm dark:border-zinc-800" onChange={(event) => setTemperatureFilter(event.target.value)} placeholder="Temperatura" value={temperatureFilter} />
+    <section className="space-y-5">
+      <div className="border-b border-rosebrand-100 pb-4 dark:border-zinc-800">
+        <h3 className="text-base font-semibold">Usuarios reais</h3>
+        <div className="mt-4 grid gap-3 md:grid-cols-[1fr_220px]">
+          <input className="rounded-lg border border-rosebrand-100 bg-transparent px-3 py-2 text-sm dark:border-zinc-800" onChange={(event) => setQuery(event.target.value)} placeholder="Buscar nome, telefone, Instagram ou Facebook" value={query} />
+          <select className="rounded-lg border border-rosebrand-100 bg-transparent px-3 py-2 text-sm dark:border-zinc-800" onChange={(event) => setSourceFilter(event.target.value)} value={sourceFilter}>
+            <option value="">Todas as origens</option>
+            <option value="traffic">Trafego pago</option>
+            <option value="organic">Mensagem normal</option>
+          </select>
         </div>
         {error && <p className="mt-3 rounded-lg bg-rosebrand-50 px-3 py-2 text-sm text-rosebrand-700">{error}</p>}
-        <div className="mt-5 overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead className="text-xs text-zinc-500">
-              <tr><th>Lead</th><th>Telefone</th><th>Status</th><th>Campanha</th><th>Score</th></tr>
-            </thead>
-            <tbody>
-              {loading && (
-                <tr className="border-t border-rosebrand-50 dark:border-zinc-800">
-                  <td className="py-3 pr-3 text-zinc-500" colSpan={5}>Carregando leads do Supabase...</td>
-                </tr>
-              )}
-              {!loading && filteredLeads.map((lead) => (
-                <tr className="border-t border-rosebrand-50 dark:border-zinc-800" key={lead.id}>
-                  <td className="py-3 pr-3 font-medium">{lead.full_name}</td>
-                  <td className="py-3 pr-3">{lead.phone}</td>
-                  <td className="py-3 pr-3">{lead.status}</td>
-                  <td className="py-3 pr-3">{lead.meta_campaign_name ?? lead.source}</td>
-                  <td className="py-3 pr-3">{lead.lead_score}</td>
-                </tr>
-              ))}
-              {!loading && filteredLeads.length === 0 && (
-                <tr className="border-t border-rosebrand-50 dark:border-zinc-800">
-                  <td className="py-3 pr-3 text-zinc-500" colSpan={5}>Nenhum lead encontrado.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
       </div>
-      <LeadDetailsPanel />
+
+      {loading && <p className="text-sm text-zinc-500">Carregando usuarios reais...</p>}
+      {!loading && filteredLeads.length === 0 && <p className="text-sm text-zinc-500">Nenhum usuario encontrado.</p>}
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {filteredLeads.map((conversation) => {
+          const ChannelIcon = leadChannelIcon(conversation);
+          return (
+            <article className="rounded-lg border border-rosebrand-100 bg-white p-4 shadow-soft dark:border-zinc-800 dark:bg-zinc-900" key={conversation.id}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className="grid size-11 shrink-0 place-items-center rounded-full bg-rosebrand-100 text-rosebrand-700">
+                    <ChannelIcon size={18} />
+                  </span>
+                  <div className="min-w-0">
+                    <h4 className="truncate text-sm font-semibold">{leadDisplayName(conversation)}</h4>
+                    <p className="truncate text-xs text-zinc-500">{leadChannelLabel(conversation)} · {leadSourceLabel(conversation)}</p>
+                  </div>
+                </div>
+                <button className="grid size-9 shrink-0 place-items-center rounded-lg bg-rosebrand-600 text-white hover:bg-rosebrand-700" onClick={() => onOpenConversation(conversation)} title="Abrir conversa" type="button">
+                  <MessageCircle size={17} />
+                </button>
+              </div>
+              <div className="mt-4 grid gap-2 text-sm text-zinc-600 dark:text-zinc-300">
+                <p><strong>Telefone:</strong> {conversation.contact_phone || "nao informado"}</p>
+                <p><strong>ID:</strong> {conversation.lead_id}</p>
+                <p><strong>Status:</strong> {conversation.status}</p>
+                <p className="truncate"><strong>Ultima mensagem:</strong> {conversation.last_message || "sem mensagem"}</p>
+              </div>
+            </article>
+          );
+        })}
+      </div>
     </section>
   );
 }

@@ -16,6 +16,11 @@ async function runSchemaStatement(db: D1Database, sql: string) {
 
 export async function ensureLocalFirstChatSchema(db: D1Database) {
   schemaReady ??= (async () => {
+    await runSchemaStatement(db, "alter table chat_conversations add column source_type text");
+    await runSchemaStatement(db, "alter table chat_conversations add column source_label text");
+    await runSchemaStatement(db, "alter table chat_conversations add column ad_code text");
+    await runSchemaStatement(db, "alter table chat_conversations add column first_inbound_at text");
+    await runSchemaStatement(db, "alter table chat_conversations add column last_inbound_at text");
     await runSchemaStatement(db, "alter table chat_conversations add column last_message text");
     await runSchemaStatement(db, "alter table chat_conversations add column last_message_type text");
     await runSchemaStatement(db, "alter table chat_conversations add column last_message_direction text");
@@ -28,9 +33,34 @@ export async function ensureLocalFirstChatSchema(db: D1Database) {
     await runSchemaStatement(db, "create index if not exists idx_chat_messages_conversation_cursor on chat_messages(conversation_id, created_at, id)");
     await runSchemaStatement(db, "create index if not exists idx_chat_messages_conversation_desc on chat_messages(conversation_id, created_at desc, id desc)");
     await runSchemaStatement(db, "create index if not exists idx_chat_conversations_last_message_at on chat_conversations(last_message_at desc)");
+    await runSchemaStatement(db, "create index if not exists idx_chat_conversations_source_type on chat_conversations(source_type)");
   })();
 
   return schemaReady;
+}
+
+function classifyConversationSource(message: ChatMessageInput) {
+  const body = (message.body ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  const explicit = message.conversationMeta?.sourceType;
+  const adCode = message.conversationMeta?.adCode ?? (message.body?.includes("VIT_D_B12_COMBO_01") ? "VIT_D_B12_COMBO_01" : null);
+  const hasComboIntent = (body.includes("combo") && body.includes("felicidade")) || (body.includes("vitamina") && body.includes("b12"));
+
+  if (explicit === "traffic" || adCode || hasComboIntent) {
+    return {
+      adCode: adCode ?? (hasComboIntent ? "VIT_D_B12_COMBO_01" : null),
+      sourceLabel: message.conversationMeta?.sourceLabel ?? "Trafego pago",
+      sourceType: "traffic"
+    };
+  }
+
+  return {
+    adCode: null,
+    sourceLabel: message.conversationMeta?.sourceLabel ?? "Mensagem normal",
+    sourceType: explicit ?? "organic"
+  };
 }
 
 type ListMessagesOptions = {
@@ -86,11 +116,30 @@ export async function listConversations(db: D1Database) {
   await ensureLocalFirstChatSchema(db);
   const { results } = await db
     .prepare(
-      "select c.id, c.lead_id, c.organization_id, c.status, c.channel, c.contact_name, c.contact_avatar_url, c.contact_phone, c.presence_status, c.is_typing, c.last_seen_at, c.last_message_at, c.last_message, c.last_message_type, c.unread_count, m.sender_type from chat_conversations c left join chat_messages m on m.id = (select id from chat_messages where conversation_id = c.id order by created_at desc, id desc limit 1) order by c.last_message_at desc limit 100"
+      "select c.id, c.lead_id, c.organization_id, c.status, c.channel, c.contact_name, c.contact_avatar_url, c.contact_phone, c.presence_status, c.is_typing, c.last_seen_at, c.last_message_at, c.last_message, c.last_message_type, c.unread_count, c.source_type, c.source_label, c.ad_code, c.first_inbound_at, c.last_inbound_at, m.sender_type from chat_conversations c left join chat_messages m on m.id = (select id from chat_messages where conversation_id = c.id order by created_at desc, id desc limit 1) order by c.last_message_at desc limit 100"
     )
     .all();
 
   return { conversations: results ?? [] };
+}
+
+export async function getConversationMetrics(db: D1Database) {
+  await ensureLocalFirstChatSchema(db);
+  const { results } = await db
+    .prepare(
+      "select coalesce(channel, case when instr(id, ':') > 0 then substr(id, 1, instr(id, ':') - 1) else 'crm' end) as channel, coalesce(source_type, 'organic') as source_type, count(*) as total from chat_conversations where lead_id not like '%debug%' and id not like '%debug%' and (channel in ('facebook','instagram','whatsapp') or id like 'facebook:%' or id like 'instagram:%' or id like 'whatsapp:%') group by channel, source_type"
+    )
+    .all<{ channel: string; source_type: string; total: number }>();
+  const rows = results ?? [];
+  const total = rows.reduce((sum, row) => sum + Number(row.total || 0), 0);
+  const traffic = rows.filter((row) => row.source_type === "traffic").reduce((sum, row) => sum + Number(row.total || 0), 0);
+  const organic = rows.filter((row) => row.source_type !== "traffic").reduce((sum, row) => sum + Number(row.total || 0), 0);
+  const channels = rows.reduce<Record<string, number>>((acc, row) => {
+    acc[row.channel] = (acc[row.channel] ?? 0) + Number(row.total || 0);
+    return acc;
+  }, {});
+
+  return { channels, organic, rows, total, traffic };
 }
 
 function channelFromConversationId(conversationId: string) {
@@ -147,6 +196,7 @@ export async function transferConversationToHuman(db: D1Database, input: { conve
 
 export async function saveMessage(db: D1Database, message: ChatMessageInput) {
   await ensureLocalFirstChatSchema(db);
+  const source = classifyConversationSource(message);
   const existing = message.externalMessageId
     ? await db
         .prepare("select id from chat_messages where external_message_id = ? limit 1")
@@ -155,8 +205,8 @@ export async function saveMessage(db: D1Database, message: ChatMessageInput) {
     : null;
 
   const conversationStatement = existing?.id
-    ? "insert into chat_conversations (id, lead_id, organization_id, status, channel, contact_name, contact_avatar_url, contact_phone, presence_status, is_typing, last_seen_at, last_message_at, last_message, last_message_type, last_message_direction, unread_count, created_at, updated_at) values (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), ?, ?, ?, ?, datetime('now'), datetime('now')) on conflict(id) do update set updated_at = datetime('now'), channel = coalesce(excluded.channel, chat_conversations.channel), contact_name = coalesce(excluded.contact_name, chat_conversations.contact_name), contact_avatar_url = coalesce(excluded.contact_avatar_url, chat_conversations.contact_avatar_url), contact_phone = coalesce(excluded.contact_phone, chat_conversations.contact_phone), presence_status = coalesce(excluded.presence_status, chat_conversations.presence_status), is_typing = excluded.is_typing, last_seen_at = datetime('now')"
-    : "insert into chat_conversations (id, lead_id, organization_id, status, channel, contact_name, contact_avatar_url, contact_phone, presence_status, is_typing, last_seen_at, last_message_at, last_message, last_message_type, last_message_direction, unread_count, created_at, updated_at) values (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), ?, ?, ?, ?, datetime('now'), datetime('now')) on conflict(id) do update set last_message_at = datetime('now'), last_message = excluded.last_message, last_message_type = excluded.last_message_type, last_message_direction = excluded.last_message_direction, unread_count = case when excluded.last_message_direction = 'inbound' then chat_conversations.unread_count + 1 else 0 end, updated_at = datetime('now'), channel = coalesce(excluded.channel, chat_conversations.channel), contact_name = coalesce(excluded.contact_name, chat_conversations.contact_name), contact_avatar_url = coalesce(excluded.contact_avatar_url, chat_conversations.contact_avatar_url), contact_phone = coalesce(excluded.contact_phone, chat_conversations.contact_phone), presence_status = coalesce(excluded.presence_status, chat_conversations.presence_status), is_typing = excluded.is_typing, last_seen_at = datetime('now')";
+    ? "insert into chat_conversations (id, lead_id, organization_id, status, channel, contact_name, contact_avatar_url, contact_phone, presence_status, is_typing, last_seen_at, last_message_at, last_message, last_message_type, last_message_direction, unread_count, source_type, source_label, ad_code, first_inbound_at, last_inbound_at, created_at, updated_at) values (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now')) on conflict(id) do update set updated_at = datetime('now'), channel = coalesce(excluded.channel, chat_conversations.channel), contact_name = coalesce(excluded.contact_name, chat_conversations.contact_name), contact_avatar_url = coalesce(excluded.contact_avatar_url, chat_conversations.contact_avatar_url), contact_phone = coalesce(excluded.contact_phone, chat_conversations.contact_phone), presence_status = coalesce(excluded.presence_status, chat_conversations.presence_status), is_typing = excluded.is_typing, last_seen_at = datetime('now'), source_type = case when excluded.source_type = 'traffic' then 'traffic' else coalesce(chat_conversations.source_type, excluded.source_type) end, source_label = case when excluded.source_type = 'traffic' then excluded.source_label else coalesce(chat_conversations.source_label, excluded.source_label) end, ad_code = coalesce(chat_conversations.ad_code, excluded.ad_code), first_inbound_at = coalesce(chat_conversations.first_inbound_at, excluded.first_inbound_at), last_inbound_at = coalesce(excluded.last_inbound_at, chat_conversations.last_inbound_at)"
+    : "insert into chat_conversations (id, lead_id, organization_id, status, channel, contact_name, contact_avatar_url, contact_phone, presence_status, is_typing, last_seen_at, last_message_at, last_message, last_message_type, last_message_direction, unread_count, source_type, source_label, ad_code, first_inbound_at, last_inbound_at, created_at, updated_at) values (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now')) on conflict(id) do update set last_message_at = datetime('now'), last_message = excluded.last_message, last_message_type = excluded.last_message_type, last_message_direction = excluded.last_message_direction, unread_count = case when excluded.last_message_direction = 'inbound' then chat_conversations.unread_count + 1 else 0 end, updated_at = datetime('now'), channel = coalesce(excluded.channel, chat_conversations.channel), contact_name = coalesce(excluded.contact_name, chat_conversations.contact_name), contact_avatar_url = coalesce(excluded.contact_avatar_url, chat_conversations.contact_avatar_url), contact_phone = coalesce(excluded.contact_phone, chat_conversations.contact_phone), presence_status = coalesce(excluded.presence_status, chat_conversations.presence_status), is_typing = excluded.is_typing, last_seen_at = datetime('now'), source_type = case when excluded.source_type = 'traffic' then 'traffic' else coalesce(chat_conversations.source_type, excluded.source_type) end, source_label = case when excluded.source_type = 'traffic' then excluded.source_label else coalesce(chat_conversations.source_label, excluded.source_label) end, ad_code = coalesce(chat_conversations.ad_code, excluded.ad_code), first_inbound_at = coalesce(chat_conversations.first_inbound_at, excluded.first_inbound_at), last_inbound_at = coalesce(excluded.last_inbound_at, chat_conversations.last_inbound_at)";
 
   await db
     .prepare(conversationStatement)
@@ -173,7 +223,12 @@ export async function saveMessage(db: D1Database, message: ChatMessageInput) {
       message.body ?? "",
       message.messageType,
       message.direction,
-      message.direction === "inbound" ? 1 : 0
+      message.direction === "inbound" ? 1 : 0,
+      source.sourceType,
+      source.sourceLabel,
+      source.adCode,
+      message.direction === "inbound" ? new Date().toISOString() : null,
+      message.direction === "inbound" ? new Date().toISOString() : null
     )
     .run();
 

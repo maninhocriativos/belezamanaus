@@ -42,6 +42,9 @@ export type ChatMessageInput = {
     contactPhone?: string;
     isTyping?: boolean;
     presenceStatus?: string;
+    adCode?: string;
+    sourceLabel?: string;
+    sourceType?: "organic" | "traffic";
   };
   status?: ChatMessageStatus;
 };

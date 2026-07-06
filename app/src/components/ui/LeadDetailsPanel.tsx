@@ -20,6 +20,12 @@ function contactInitial(conversation?: ChatConversation) {
   return contactName(conversation)[0] || "L";
 }
 
+function sourceName(conversation?: ChatConversation) {
+  if (!conversation) return "Mensagem normal";
+  if (conversation.source_type === "traffic") return conversation.ad_code ? `Trafego pago (${conversation.ad_code})` : "Trafego pago";
+  return conversation.source_label || "Mensagem normal";
+}
+
 export function LeadDetailsPanel({ conversation }: LeadDetailsPanelProps) {
   function notify(action: string) {
     window.dispatchEvent(new CustomEvent("crm-action", { detail: action }));
@@ -41,9 +47,9 @@ export function LeadDetailsPanel({ conversation }: LeadDetailsPanelProps) {
           <p className="text-xs text-zinc-500">{conversation?.contact_phone || conversation?.lead_id || "sem telefone"}</p>
         </div>
         <div className="mt-4 space-y-3 text-sm">
-          <p><strong>Origem:</strong> {conversation?.channel || conversation?.sender_type || "Meta Leads"}</p>
-          <p><strong>Campanha:</strong> Avaliacao Julho</p>
-          <p><strong>Formulario:</strong> Avaliacao gratuita</p>
+          <p><strong>Canal:</strong> {conversation?.channel || conversation?.sender_type || "CRM"}</p>
+          <p><strong>Origem:</strong> {sourceName(conversation)}</p>
+          <p><strong>Codigo:</strong> {conversation?.ad_code || "nao identificado"}</p>
           <p><strong>Atendente:</strong> Aline</p>
         </div>
         <div className="flex gap-2">
