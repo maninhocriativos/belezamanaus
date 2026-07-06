@@ -111,6 +111,16 @@ export async function findRecentOutboundText(db: D1Database, input: { body: stri
     .first<{ id: string; body: string; status: string }>();
 }
 
+export async function getConversationStatus(db: D1Database, conversationId: string) {
+  await ensureLocalFirstChatSchema(db);
+  const conversation = await db
+    .prepare("select status from chat_conversations where id = ? limit 1")
+    .bind(conversationId)
+    .first<{ status: string }>();
+
+  return conversation?.status ?? null;
+}
+
 export async function findLatestInboundMessageAt(db: D1Database, conversationId: string) {
   await ensureLocalFirstChatSchema(db);
   const message = await db
@@ -119,6 +129,20 @@ export async function findLatestInboundMessageAt(db: D1Database, conversationId:
     .first<{ created_at: string }>();
 
   return message?.created_at ?? null;
+}
+
+export async function transferConversationToHuman(db: D1Database, input: { conversationId: string; payload: unknown; status: string }) {
+  await ensureLocalFirstChatSchema(db);
+
+  await db
+    .prepare("update chat_conversations set status = ?, updated_at = datetime('now') where id = ?")
+    .bind(input.status, input.conversationId)
+    .run();
+
+  await db
+    .prepare("insert into chat_events (id, conversation_id, event_type, payload, created_at) values (?, ?, ?, ?, datetime('now'))")
+    .bind(crypto.randomUUID(), input.conversationId, "human_handoff", JSON.stringify(input.payload).slice(0, 12000))
+    .run();
 }
 
 export async function saveMessage(db: D1Database, message: ChatMessageInput) {

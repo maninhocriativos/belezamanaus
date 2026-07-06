@@ -1,43 +1,111 @@
-export async function draftAgentReply(payload: unknown) {
-  const input = typeof payload === "object" && payload !== null ? (payload as { message?: string }) : {};
-  const originalMessage = String(input.message ?? "").trim();
-  const message = originalMessage
+﻿type AgentPayload = {
+  leadId?: string;
+  message?: string;
+  offerValue?: string;
+  organizationId?: string;
+};
+
+const ADS = {
+  VIT_D_B12_COMBO_01: {
+    code: "VIT_D_B12_COMBO_01",
+    offer: "Combo da Felicidade",
+    procedure: "Reposicao de Vitaminas D + B12"
+  }
+} as const;
+
+type KnownAdCode = keyof typeof ADS;
+
+function normalizeText(value: string) {
+  return value
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .trim();
-  const intro = "Oi, sou a Aline da Fisiolipo.";
-  let reply = `${intro} Me conta qual area voce quer tratar e se seu objetivo e reduzir medidas, melhorar contorno ou aliviar algum incomodo. Assim eu direciono melhor sua avaliacao.`;
+}
+
+function identifyAdCode(originalMessage: string, message: string): KnownAdCode | null {
+  if (originalMessage.includes("VIT_D_B12_COMBO_01")) return "VIT_D_B12_COMBO_01";
+  if ((message.includes("combo") && message.includes("felicidade")) || (message.includes("vitamina") && message.includes("b12"))) return "VIT_D_B12_COMBO_01";
+  return null;
+}
+
+function hasAny(message: string, terms: string[]) {
+  return terms.some((term) => message.includes(term));
+}
+
+function shouldHandoff(message: string) {
+  return hasAny(message, [
+    "agendar",
+    "agenda",
+    "agendamento",
+    "horario",
+    "hoje",
+    "amanha",
+    "outro dia",
+    "manha",
+    "tarde",
+    "noite",
+    "reservar",
+    "reserva",
+    "pagar",
+    "pagamento",
+    "pix",
+    "cartao",
+    "quero fazer",
+    "quero marcar",
+    "pode marcar",
+    "vou querer",
+    "fechar"
+  ]);
+}
+
+function buildHandoff(adCode: KnownAdCode) {
+  const ad = ADS[adCode];
+  return {
+    status: "ATENDIMENTO_HUMANO",
+    motivo: "RESERVA_COM_PAGAMENTO_50",
+    origem_anuncio: ad.code,
+    oferta: ad.offer,
+    procedimento: ad.procedure
+  };
+}
+
+export async function draftAgentReply(payload: unknown) {
+  const input = typeof payload === "object" && payload !== null ? (payload as AgentPayload) : {};
+  const originalMessage = String(input.message ?? "").trim();
+  const message = normalizeText(originalMessage);
+  const adCode = identifyAdCode(originalMessage, message) ?? "VIT_D_B12_COMBO_01";
+  const ad = ADS[adCode];
+  const offerValue = String(input.offerValue ?? "[VALOR]").trim() || "[VALOR]";
+  let handoff = null;
+  let reply = `Ola! Que bom ter voce por aqui \uD83D\uDE0A\n\nVoce veio do anuncio do ${ad.offer}, nossa oferta especial de reposicao de Vitaminas D + B12.\n\nPosso te passar valor, horarios disponiveis e explicar como funciona o agendamento.\n\nVoce gostaria de atendimento para hoje ou para outro dia?`;
 
   if (!message) {
-    reply = `${intro} Recebi sua mensagem. Para te ajudar melhor, voce busca avaliacao corporal, facial, dor/incomodo ou acompanhamento estetico?`;
-  } else if (/^(oi|ola|olá|bom dia|boa tarde|boa noite|hey|hello)$/i.test(originalMessage)) {
-    reply = `${intro} Seja bem-vinda(o). Voce procura ajuda com reducao de medidas, gordura localizada, celulite, flacidez, facial ou outro objetivo?`;
-  } else if (/^(teste|test|testando)$/i.test(message)) {
-    reply = `${intro} Recebi seu teste por aqui. Quando quiser, me diga o procedimento ou objetivo do lead que eu continuo o atendimento.`;
-  } else if (message.includes("vitamina") || message.includes("vitaminas") || message.includes("soro") || message.includes("soroterapia")) {
-    reply = `${intro} Entendi seu interesse em vitaminas/soroterapia. Voce busca mais energia, imunidade, recuperacao, estetica ou indicacao medica? Posso encaminhar para avaliacao com a equipe.`;
-  } else if (message.includes("preco") || message.includes("valor") || message.includes("quanto") || message.includes("custa")) {
-    reply = `${intro} Os valores dependem do objetivo, regiao tratada e protocolo indicado. Posso te colocar em uma avaliacao para a especialista orientar com seguranca?`;
-  } else if (message.includes("agenda") || message.includes("horario") || message.includes("avaliacao")) {
-    reply = `${intro} Posso te ajudar com a avaliacao. Voce prefere hoje, amanha ou outro dia? Se puder, me diga tambem o melhor turno.`;
-  } else if (message.includes("barriga") || message.includes("medida") || message.includes("gordura") || message.includes("emagrecer") || message.includes("culote") || message.includes("flanco")) {
-    reply = `${intro} Entendi. Para reducao de medidas/gordura localizada, a especialista avalia a regiao e monta o protocolo ideal. Qual area mais te incomoda hoje?`;
-  } else if (message.includes("celulite") || message.includes("flacidez") || message.includes("estria")) {
-    reply = `${intro} Da para avaliar isso com calma. A especialista precisa ver a regiao e entender ha quanto tempo voce percebeu essa queixa. Qual area voce quer tratar?`;
-  } else if (message.includes("rosto") || message.includes("facial") || message.includes("pele") || message.includes("limpeza") || message.includes("melasma")) {
-    reply = `${intro} Para cuidados faciais, a avaliacao ajuda a entender pele, sensibilidade e objetivo. Voce quer tratar manchas, acne, textura, limpeza de pele ou rejuvenescimento?`;
-  } else if (message.includes("dor") || message.includes("pos operatorio") || message.includes("pos-operatorio") || message.includes("drenagem")) {
-    reply = `${intro} Entendi. Para dor, drenagem ou pos-operatorio, preciso saber qual regiao e quando comecou. Voce ja esta em acompanhamento medico?`;
-  } else if (message.includes("local") || message.includes("endereco") || message.includes("onde")) {
-    reply = `${intro} Atendemos em Manaus. Posso confirmar o endereco e o melhor horario com a equipe. Voce quer agendar uma avaliacao?`;
-  } else if (message.includes("humano") || message.includes("atendente") || message.includes("pessoa")) {
-    reply = `${intro} Claro, vou chamar uma pessoa da equipe para continuar com voce. Enquanto isso, me diga rapidinho qual e o assunto do atendimento.`;
+    reply = `Ola! Que bom ter voce por aqui \uD83D\uDE0A\n\nVoce gostaria de atendimento para hoje ou para outro dia?`;
+  } else if (hasAny(message, ["preco", "valor", "quanto", "custa"])) {
+    reply = `A oferta especial do ${ad.offer} esta saindo por R$ ${offerValue}.\n\nPara reservar a data e o horario, e necessario o pagamento de 50% do valor.\n\nO restante pode ser acertado no dia do atendimento.\n\nVoce gostaria que eu verificasse um horario disponivel para voce?`;
+  } else if (hasAny(message, ["como funciona", "funciona", "atendimento"])) {
+    reply = "O atendimento e feito com horario agendado. Primeiro verificamos o melhor dia e periodo para voce. Para reservar a data, e necessario o pagamento de 50% do valor, e o restante pode ser acertado no dia do atendimento.\n\nVoce prefere atendimento hoje ou outro dia?";
+  } else if (hasAny(message, ["para que serve", "pra que serve", "serve para", "beneficio", "beneficios"])) {
+    reply = "A reposicao de Vitaminas D + B12 faz parte de uma rotina de autocuidado e bem-estar. A equipe orienta cada caso antes do atendimento, de forma profissional e segura.\n\nQuer que eu veja horarios disponiveis para voce?";
+  } else if (shouldHandoff(message)) {
+    const chosePeriod = hasAny(message, ["manha", "tarde", "noite"]);
+    handoff = buildHandoff(adCode);
+    reply = chosePeriod
+      ? "Certo. Para reservar sua data e horario, e necessario o pagamento de 50% do valor da oferta.\n\nVou te transferir agora para uma atendente finalizar sua reserva, confirmar a disponibilidade certinha e enviar as informacoes de pagamento."
+      : "Perfeito \uD83D\uDE0A\n\nQual melhor periodo para voce?\n\n1\uFE0F\u20E3 Manha\n2\uFE0F\u20E3 Tarde\n3\uFE0F\u20E3 Noite";
   }
 
   return {
     mode: "assisted",
     reply,
+    handoff,
+    ad: {
+      origem_anuncio: ad.code,
+      oferta: ad.offer,
+      procedimento: ad.procedure
+    },
     payload
   };
+
 }

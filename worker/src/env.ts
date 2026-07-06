@@ -12,4 +12,5 @@ export type Env = {
   META_PHONE_NUMBER_ID?: string;
   WHATSAPP_ACCESS_TOKEN?: string;
   APP_ENV: string;
+  COMBO_FELICIDADE_VALUE?: string;
 };

@@ -1,6 +1,6 @@
 import type { Env } from "../env";
 import type { NormalizedMessage } from "../types/chat";
-import { findLatestInboundMessageAt, findRecentOutboundText, saveMessage, updateMessageStatus } from "./d1";
+import { findLatestInboundMessageAt, findRecentOutboundText, getConversationStatus, saveMessage, transferConversationToHuman, updateMessageStatus } from "./d1";
 import { draftAgentReply } from "./agent-brain";
 import { normalizeFacebookMessagingPayload } from "./facebook-adapter";
 import { normalizeInstagramMessagingPayload } from "./instagram-adapter";
@@ -462,8 +462,19 @@ export async function sendOutboundChannelMessage(env: Env, input: { conversation
 async function maybeAutoReplyToLead(env: Env, message: InboundMetaMessage, savedMessage: Record<string, unknown>) {
   if (savedMessage.deduped || message.messageType !== "text" || !message.body.trim()) return;
 
-  const draft = await draftAgentReply({ leadId: message.leadId, message: message.body, organizationId: "beleza-manaus" });
+  const conversationStatus = await getConversationStatus(env.DB, message.conversationId);
+  if (conversationStatus === "ATENDIMENTO_HUMANO") return;
+
+  const draft = await draftAgentReply({ leadId: message.leadId, message: message.body, offerValue: env.COMBO_FELICIDADE_VALUE, organizationId: "beleza-manaus" });
   if (!draft.reply) return;
+
+  if (draft.handoff) {
+    await transferConversationToHuman(env.DB, {
+      conversationId: message.conversationId,
+      payload: draft.handoff,
+      status: draft.handoff.status
+    });
+  }
 
   const recentDuplicate = await findRecentOutboundText(env.DB, {
     body: draft.reply,
