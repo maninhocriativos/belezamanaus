@@ -377,22 +377,12 @@ async function postGraphMessage(endpointId: string, env: Env, recipientId: strin
 }
 
 async function sendFacebookOrInstagramMessage(env: Env, input: { channel: string; conversationId: string; recipientId: string; senderType?: "agent" | "human"; text: string }) {
-  const endpointIds = input.channel === "instagram"
-    ? [getInstagramAccountId(env), "me", getMessengerPageId(env)]
-    : [getMessengerPageId(env), "me"];
-  const uniqueEndpointIds = [...new Set(endpointIds.filter((endpointId): endpointId is string => Boolean(endpointId)))];
+  const endpointId = input.channel === "instagram"
+    ? requireInstagramAccountId(env)
+    : getMessengerPageId(env);
   const policy = await resolveMessengerPolicy(env, input);
-  let lastError = "";
 
-  for (const endpointId of uniqueEndpointIds) {
-    try {
-      return await postGraphMessage(endpointId, env, input.recipientId, input.text, policy);
-    } catch (error) {
-      lastError = error instanceof Error ? error.message : "Meta recusou o envio.";
-    }
-  }
-
-  throw new Error(lastError || "Meta recusou o envio.");
+  return postGraphMessage(endpointId, env, input.recipientId, input.text, policy);
 }
 
 async function fetchChannelProfile(env: Env, provider: InboundMetaMessage["provider"], id: string) {
