@@ -58,7 +58,7 @@ export async function handleChat(request: Request, env: Env): Promise<Response> 
 
     try {
       if (payload.direction === "outbound" && payload.messageType === "text" && payload.body) {
-        const result = await sendOutboundChannelMessage(env, { conversationId: payload.conversationId, text: payload.body });
+        const result = await sendOutboundChannelMessage(env, { conversationId: payload.conversationId, senderType: payload.senderType === "human" ? "human" : "agent", text: payload.body });
         externalMessageId = result.externalMessageId;
       } else if (payload.direction === "outbound" && payload.messageType !== "text") {
         const channel = channelFromConversationId(payload.conversationId);

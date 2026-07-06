@@ -1,0 +1,55 @@
+{
+  "channels": ["facebook", "instagram"],
+  "policy": {
+    "standardWindowHours": 24,
+    "humanAgentWindowDays": 7,
+    "approvalNeeded": [
+      "pages_messaging",
+      "instagram_manage_messages",
+      "human_agent"
+    ]
+  },
+  "templates": [
+    {
+      "key": "retorno_atendimento",
+      "allowedUse": "Responder uma pessoa que ja chamou a clinica e precisa continuar um atendimento iniciado.",
+      "preferredTag": "HUMAN_AGENT",
+      "text": "Ola {{nome}}, aqui e da Fisiolipo. Vi seu interesse em {{interesse}} e posso continuar seu atendimento por aqui. Quer que eu te ajude?"
+    },
+    {
+      "key": "confirmacao_agendamento",
+      "allowedUse": "Confirmar ou ajustar um horario solicitado pela pessoa.",
+      "preferredTag": "HUMAN_AGENT",
+      "text": "Ola {{nome}}, seu atendimento na Fisiolipo esta previsto para {{data_hora}}. Se precisar ajustar o horario, responda esta mensagem."
+    },
+    {
+      "key": "reagendamento",
+      "allowedUse": "Retomar uma conversa quando a pessoa pediu agenda, mas ainda nao escolheu horario.",
+      "preferredTag": "HUMAN_AGENT",
+      "text": "Ola {{nome}}, temos disponibilidade para continuar seu atendimento sobre {{interesse}}. Posso te mostrar os horarios?"
+    },
+    {
+      "key": "pos_atendimento",
+      "allowedUse": "Acompanhar uma pessoa depois de atendimento ou avaliacao ja solicitada.",
+      "preferredTag": "HUMAN_AGENT",
+      "text": "Ola {{nome}}, passando para acompanhar seu atendimento sobre {{interesse}}. Ficou alguma duvida que eu possa te ajudar?"
+    },
+    {
+      "key": "documentos_orientacoes",
+      "allowedUse": "Enviar orientacao operacional combinada no atendimento, sem promocao.",
+      "preferredTag": "HUMAN_AGENT",
+      "text": "Ola {{nome}}, conforme seu atendimento na Fisiolipo, posso te enviar as orientacoes sobre {{assunto}} por aqui?"
+    }
+  ],
+  "appReview": {
+    "businessJustification": "A Fisiolipo usa Facebook Messenger e Instagram Messaging para continuar atendimentos iniciados por pacientes e leads que chamaram a clinica. A equipe humana precisa responder duvidas, confirmar horarios e acompanhar solicitacoes quando a conversa passa da janela padrao de 24 horas.",
+    "humanAgentJustification": "As mensagens com HUMAN_AGENT serao usadas apenas por atendentes humanos para dar continuidade a conversas iniciadas pelo usuario. Nao serao usadas para disparos promocionais, automacao em massa ou mensagens sem contexto.",
+    "reviewNotes": [
+      "Abrir o CRM da Fisiolipo.",
+      "Entrar em uma conversa de Facebook ou Instagram iniciada pelo usuario.",
+      "Responder dentro da janela padrao usando messaging_type RESPONSE.",
+      "Simular conversa com mais de 24 horas e responder usando tag HUMAN_AGENT somente com acao humana.",
+      "Confirmar que mensagens promocionais ou sem opt-in nao sao enviadas fora da janela permitida."
+    ]
+  }
+}

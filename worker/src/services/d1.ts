@@ -111,6 +111,16 @@ export async function findRecentOutboundText(db: D1Database, input: { body: stri
     .first<{ id: string; body: string; status: string }>();
 }
 
+export async function findLatestInboundMessageAt(db: D1Database, conversationId: string) {
+  await ensureLocalFirstChatSchema(db);
+  const message = await db
+    .prepare("select created_at from chat_messages where conversation_id = ? and direction = 'inbound' order by created_at desc, id desc limit 1")
+    .bind(conversationId)
+    .first<{ created_at: string }>();
+
+  return message?.created_at ?? null;
+}
+
 export async function saveMessage(db: D1Database, message: ChatMessageInput) {
   await ensureLocalFirstChatSchema(db);
   const existing = message.externalMessageId

@@ -1,6 +1,6 @@
 import type { Env } from "../env";
 import type { NormalizedMessage } from "../types/chat";
-import { findRecentOutboundText, saveMessage, updateMessageStatus } from "./d1";
+import { findLatestInboundMessageAt, findRecentOutboundText, saveMessage, updateMessageStatus } from "./d1";
 import { draftAgentReply } from "./agent-brain";
 import { normalizeFacebookMessagingPayload } from "./facebook-adapter";
 import { normalizeInstagramMessagingPayload } from "./instagram-adapter";
@@ -316,11 +316,48 @@ function getChannelRecipient(conversationId: string) {
   };
 }
 
-async function postGraphMessage(endpointId: string, env: Env, recipientId: string, text: string) {
+function parseD1Date(value: string | null) {
+  if (!value) return null;
+  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value) ? `${value.replace(" ", "T")}Z` : value;
+  const date = new Date(normalized);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function hoursSince(value: string | null) {
+  const date = parseD1Date(value);
+  if (!date) return 0;
+  return (Date.now() - date.getTime()) / 36e5;
+}
+
+async function resolveMessengerPolicy(env: Env, input: { channel: string; conversationId: string; senderType?: "agent" | "human" }) {
+  if (input.channel !== "facebook" && input.channel !== "instagram") {
+    return { messagingType: "RESPONSE" as const };
+  }
+
+  const lastInboundAt = await findLatestInboundMessageAt(env.DB, input.conversationId);
+  const elapsedHours = hoursSince(lastInboundAt);
+  if (elapsedHours <= 24) {
+    return { messagingType: "RESPONSE" as const };
+  }
+
+  const humanAgentEnabled = env.META_HUMAN_AGENT_ENABLED === "true";
+  if (input.senderType === "human" && humanAgentEnabled && elapsedHours <= 24 * 7) {
+    return { messagingType: "MESSAGE_TAG" as const, tag: "HUMAN_AGENT" as const };
+  }
+
+  throw new Error(
+    input.senderType === "human"
+      ? "Conversa fora da janela de 24h. Solicite aprovacao human_agent na Meta e ative META_HUMAN_AGENT_ENABLED=true para atendimento humano ate 7 dias."
+      : "Conversa fora da janela de 24h. Automacao nao pode usar HUMAN_AGENT; aguarde nova mensagem do cliente ou acao humana permitida."
+  );
+}
+
+async function postGraphMessage(endpointId: string, env: Env, recipientId: string, text: string, policy: { messagingType: "MESSAGE_TAG" | "RESPONSE"; tag?: "HUMAN_AGENT" }) {
   const accessToken = requirePageAccessToken(env);
   const response = await fetch(`https://graph.facebook.com/v20.0/${endpointId}/messages?access_token=${encodeURIComponent(accessToken)}`, {
     body: JSON.stringify({
-      messaging_type: "RESPONSE",
+      messaging_type: policy.messagingType,
+      ...(policy.tag ? { tag: policy.tag } : {}),
       message: { text },
       recipient: { id: recipientId }
     }),
@@ -339,16 +376,17 @@ async function postGraphMessage(endpointId: string, env: Env, recipientId: strin
   return data as { message_id?: string; recipient_id?: string };
 }
 
-async function sendFacebookOrInstagramMessage(env: Env, channel: string, recipientId: string, text: string) {
-  const endpointIds = channel === "instagram"
-    ? [getMessengerPageId(env), "me", getInstagramAccountId(env)]
+async function sendFacebookOrInstagramMessage(env: Env, input: { channel: string; conversationId: string; recipientId: string; senderType?: "agent" | "human"; text: string }) {
+  const endpointIds = input.channel === "instagram"
+    ? [getInstagramAccountId(env), "me", getMessengerPageId(env)]
     : [getMessengerPageId(env), "me"];
   const uniqueEndpointIds = [...new Set(endpointIds.filter((endpointId): endpointId is string => Boolean(endpointId)))];
+  const policy = await resolveMessengerPolicy(env, input);
   let lastError = "";
 
   for (const endpointId of uniqueEndpointIds) {
     try {
-      return await postGraphMessage(endpointId, env, recipientId, text);
+      return await postGraphMessage(endpointId, env, input.recipientId, input.text, policy);
     } catch (error) {
       lastError = error instanceof Error ? error.message : "Meta recusou o envio.";
     }
@@ -415,11 +453,11 @@ async function sendWhatsappMessage(env: Env, recipientId: string, text: string) 
   return { message_id: messages?.[0]?.id };
 }
 
-export async function sendOutboundChannelMessage(env: Env, input: { conversationId: string; text: string }) {
+export async function sendOutboundChannelMessage(env: Env, input: { conversationId: string; senderType?: "agent" | "human"; text: string }) {
   const { channel, recipientId } = getChannelRecipient(input.conversationId);
 
   if (channel === "facebook" || channel === "instagram") {
-    const data = await sendFacebookOrInstagramMessage(env, channel, recipientId, input.text);
+    const data = await sendFacebookOrInstagramMessage(env, { channel, conversationId: input.conversationId, recipientId, senderType: input.senderType, text: input.text });
     return { channel, externalMessageId: data.message_id, ok: true };
   }
 
@@ -445,7 +483,7 @@ async function maybeAutoReplyToLead(env: Env, message: InboundMetaMessage, saved
   if (recentDuplicate) return;
 
   try {
-    const sent = await sendOutboundChannelMessage(env, { conversationId: message.conversationId, text: draft.reply });
+    const sent = await sendOutboundChannelMessage(env, { conversationId: message.conversationId, senderType: "agent", text: draft.reply });
     await saveMessage(env.DB, {
       body: draft.reply,
       conversationId: message.conversationId,
