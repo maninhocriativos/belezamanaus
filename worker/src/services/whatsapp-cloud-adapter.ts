@@ -73,6 +73,44 @@ export async function sendWhatsappCloudText(env: Env, input: SendTextInput) {
   return { externalMessageId: messages?.[0]?.id, ok: true };
 }
 
+export async function sendWhatsappCloudMedia(env: Env, input: SendTextInput & { body?: string; mediaMimeType?: string; mediaUrl: string; messageType: string }) {
+  const accessToken = env.WHATSAPP_ACCESS_TOKEN || env.META_PAGE_ACCESS_TOKEN;
+
+  if (!env.META_PHONE_NUMBER_ID || !accessToken) {
+    throw new Error("WhatsApp Cloud API nao esta configurado.");
+  }
+
+  if (!input.mediaUrl.startsWith("https://")) {
+    throw new Error("Para enviar midia no WhatsApp, o arquivo precisa de uma URL publica HTTPS.");
+  }
+
+  const type = input.messageType === "audio" || input.messageType === "video" || input.messageType === "image"
+    ? input.messageType
+    : "document";
+  const mediaPayload = type === "document"
+    ? { link: input.mediaUrl, filename: input.body?.split(" (")[0] || "arquivo" }
+    : { link: input.mediaUrl, ...(input.body && type !== "audio" ? { caption: input.body } : {}) };
+
+  const response = await fetch(`https://graph.facebook.com/v20.0/${env.META_PHONE_NUMBER_ID}/messages`, {
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: input.recipientId,
+      type,
+      [type]: mediaPayload
+    }),
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+      "content-type": "application/json"
+    },
+    method: "POST"
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(JSON.stringify(data));
+  const messages = Array.isArray((data as { messages?: unknown[] }).messages) ? (data as { messages?: Array<{ id?: string }> }).messages : [];
+  return { externalMessageId: messages?.[0]?.id, ok: true };
+}
+
 export const whatsappCloudAdapter: MessageAdapter = {
   channel: "whatsapp",
   normalizeInbound: normalizeWhatsappCloudPayload,

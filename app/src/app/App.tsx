@@ -75,6 +75,36 @@ type ChatMetrics = {
   traffic: number;
 };
 
+type MetaAdInsight = {
+  ad_id?: string;
+  ad_name?: string;
+  campaign_id?: string;
+  campaign_name?: string;
+  clicks?: string;
+  impressions?: string;
+  spend?: string;
+};
+
+type MetaAdsInsightsResponse = {
+  campaigns: MetaAdInsight[];
+  mode: "meta" | "meta-error" | "not-configured" | "placeholder";
+  range?: string;
+};
+
+function buildMetaAdRows(insights: MetaAdInsight[]): CampaignPerformanceRow[] {
+  return insights.map((item) => {
+    const clicks = Number(item.clicks || 0);
+    const spend = Number(item.spend || 0);
+    return {
+      campaign: item.ad_name || item.campaign_name || item.ad_id || "Anuncio",
+      cpl: clicks > 0 ? currency(spend / clicks) : "-",
+      leads: clicks,
+      roas: spend > 0 ? currency(spend) : "-",
+      sales: 0
+    };
+  });
+}
+
 export function App() {
   const legalPageKind = getLegalPageKind(window.location.pathname);
   const [activePage, setActivePageState] = useState<AppPage>(() => {
@@ -446,23 +476,39 @@ function CampaignsView() {
 
 function AdsPerformanceView() {
   const [campaigns, setCampaigns] = useState<CrmCampaign[]>([]);
+  const [insights, setInsights] = useState<MetaAdsInsightsResponse | null>(null);
   const [leads, setLeads] = useState<CrmLead[]>([]);
   const [sales, setSales] = useState<CrmSale[]>([]);
 
   useEffect(() => {
-    Promise.all([listCampaigns(), listLeads(), listSales()]).then(([nextCampaigns, nextLeads, nextSales]) => {
+    Promise.all([
+      listCampaigns(),
+      listLeads(),
+      listSales(),
+      apiFetch<MetaAdsInsightsResponse>("/meta/ads-insights").catch(() => null)
+    ]).then(([nextCampaigns, nextLeads, nextSales, nextInsights]) => {
       setCampaigns(nextCampaigns);
       setLeads(nextLeads);
       setSales(nextSales);
+      setInsights(nextInsights);
     });
   }, []);
 
-  const rows = buildCampaignRows(campaigns, leads, sales);
+  const metaRows = insights?.mode === "meta" ? buildMetaAdRows(insights.campaigns) : [];
+  const rows = metaRows.length ? metaRows : buildCampaignRows(campaigns, leads, sales);
+  const totalClicks = insights?.campaigns.reduce((sum, item) => sum + Number(item.clicks || 0), 0) ?? 0;
+  const totalSpend = insights?.campaigns.reduce((sum, item) => sum + Number(item.spend || 0), 0) ?? 0;
+  const totalImpressions = insights?.campaigns.reduce((sum, item) => sum + Number(item.impressions || 0), 0) ?? 0;
 
   return (
     <section className="grid gap-5">
+      <div className="grid gap-4 md:grid-cols-3">
+        <MetricCard label="Origem" value={insights?.mode === "meta" ? "Meta real" : "Dados internos"} trend={insights?.mode ?? "carregando"} />
+        <MetricCard label="Cliques" value={String(totalClicks)} trend={`${totalImpressions} impressoes`} />
+        <MetricCard label="Investimento" value={currency(totalSpend)} trend={insights?.range ?? "ultimos 30 dias"} />
+      </div>
       <CampaignPerformanceTable rows={rows} />
-      <ChartCard bars={rows.map((row) => ({ label: row.campaign.slice(0, 10), value: row.sales }))} note="vendas por campanha" title="Conversao por anuncio" />
+      <ChartCard bars={rows.map((row) => ({ label: row.campaign.slice(0, 10), value: metaRows.length ? row.leads : row.sales }))} note={metaRows.length ? "cliques por anuncio" : "vendas por campanha"} title="Conversao por anuncio" />
     </section>
   );
 }

@@ -1,6 +1,6 @@
 import type { Env } from "../env";
 import { getConversationMetrics, listConversations, listMessages, saveMessage } from "../services/d1";
-import { sendOutboundChannelMessage, syncInstagramInbox, syncMessengerInbox } from "../services/meta";
+import { sendOutboundChannelMedia, sendOutboundChannelMessage, syncInstagramInbox, syncMessengerInbox } from "../services/meta";
 import { normalizeMessage } from "../services/message-normalizer";
 import { formatProviderError } from "../services/provider-error";
 
@@ -66,9 +66,19 @@ export async function handleChat(request: Request, env: Env): Promise<Response> 
         externalMessageId = result.externalMessageId;
       } else if (payload.direction === "outbound" && payload.messageType !== "text") {
         const channel = channelFromConversationId(payload.conversationId);
-        if (channel === "facebook" || channel === "instagram" || channel === "whatsapp") {
+        if ((channel === "facebook" || channel === "instagram" || channel === "whatsapp") && payload.mediaUrl) {
+          const result = await sendOutboundChannelMedia(env, {
+            body: payload.body,
+            conversationId: payload.conversationId,
+            mediaMimeType: payload.mediaMimeType,
+            mediaUrl: payload.mediaUrl,
+            messageType: payload.messageType,
+            senderType: payload.senderType === "human" ? "human" : "agent"
+          });
+          externalMessageId = result.externalMessageId;
+        } else if (channel === "facebook" || channel === "instagram" || channel === "whatsapp") {
           status = "failed";
-          providerError = "Midia registrada no CRM. Para entregar audio, fotos e arquivos no canal externo, configure um upload publico HTTPS e envio de anexos pela API Meta.";
+          providerError = "Midia registrada no CRM, mas sem URL publica HTTPS para envio no canal externo.";
         }
       }
     } catch (error) {

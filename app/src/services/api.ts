@@ -3,10 +3,11 @@ import { supabase } from "../lib/supabase";
 
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const session = supabase ? (await supabase.auth.getSession()).data.session : null;
+  const isFormData = init?.body instanceof FormData;
   const response = await fetch(`${appEnv.apiUrl}${path}`, {
     ...init,
     headers: {
-      "content-type": "application/json",
+      ...(isFormData ? {} : { "content-type": "application/json" }),
       ...(session?.access_token ? { authorization: `Bearer ${session.access_token}` } : {}),
       ...init?.headers
     }

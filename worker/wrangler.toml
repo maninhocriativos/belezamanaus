@@ -6,3 +6,7 @@ compatibility_date = "2026-07-03"
 binding = "DB"
 database_name = "fisiolipo-crm-chat"
 database_id = "cdd1129f-54a7-43a0-8247-972781bb9e02"
+
+[[r2_buckets]]
+binding = "MEDIA_BUCKET"
+bucket_name = "belezamanaus-media"

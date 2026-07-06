@@ -1,11 +1,19 @@
 export type Env = {
   DB: D1Database;
+  MEDIA_BUCKET?: R2Bucket;
+  R2_PUBLIC_BASE_URL?: string;
   SUPABASE_URL: string;
   SUPABASE_ANON_KEY?: string;
   SUPABASE_SERVICE_ROLE_KEY: string;
+  AI_API_KEY?: string;
+  AI_MODEL?: string;
+  AI_PROVIDER?: string;
+  AUDIO_TRANSCRIPTION_PROVIDER?: string;
+  IMAGE_UNDERSTANDING_PROVIDER?: string;
   META_VERIFY_TOKEN: string;
   META_INSTAGRAM_ACCOUNT_ID?: string;
   META_HUMAN_AGENT_ENABLED?: string;
+  META_AD_ACCOUNT_ID?: string;
   META_PAGE_ID?: string;
   META_PAGE_ACCESS_TOKEN: string;
   META_CONVERSIONS_ACCESS_TOKEN: string;

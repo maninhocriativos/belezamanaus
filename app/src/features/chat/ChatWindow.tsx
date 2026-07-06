@@ -43,6 +43,14 @@ type OutboundMediaPayload = {
   messageType: "audio" | "document" | "image" | "video";
 };
 
+type MediaUploadResponse = {
+  mediaMimeType: string;
+  mediaSize: number;
+  mediaUrl: string;
+  ok: boolean;
+  originalName: string;
+};
+
 type ChatContact = {
   avatarUrl?: string | null;
   channel?: string | null;
@@ -466,19 +474,38 @@ export function ChatWindow({ contact, conversationId, leadId }: ChatWindowProps)
     }
   }
 
+  async function uploadMedia(file: File) {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("conversationId", conversationId);
+    formData.append("organizationId", organizationId);
+
+    return apiFetch<MediaUploadResponse>("/media", {
+      body: formData,
+      method: "POST"
+    });
+  }
+
   function handleFiles(files: FileList | null) {
     const selectedFiles = Array.from(files ?? []);
     if (selectedFiles.length === 0) return;
     for (const file of selectedFiles) {
       const messageType = fileMessageType(file);
-      const mediaUrl = URL.createObjectURL(file);
-      sendMediaPayload({
-        body: `${file.name} (${readableFileSize(file.size)})`,
-        mediaMimeType: file.type || "application/octet-stream",
-        mediaSize: file.size,
-        mediaUrl,
-        messageType
-      }).catch(() => undefined);
+      setUploadingFiles((current) => current + 1);
+      setActionMessage(`Subindo ${messageType === "document" ? "arquivo" : messageType} para envio...`);
+      uploadMedia(file)
+        .then((uploaded) => sendMediaPayload({
+          body: `${uploaded.originalName || file.name} (${readableFileSize(uploaded.mediaSize || file.size)})`,
+          mediaMimeType: uploaded.mediaMimeType || file.type || "application/octet-stream",
+          mediaSize: uploaded.mediaSize || file.size,
+          mediaUrl: uploaded.mediaUrl,
+          messageType
+        }))
+        .catch((error) => {
+          const message = error instanceof Error ? error.message : "Nao foi possivel subir o arquivo.";
+          setActionMessage(message.includes("R2 nao esta configurado") ? "R2 ainda nao esta configurado para midias. Configure MEDIA_BUCKET e R2_PUBLIC_BASE_URL." : "Nao foi possivel subir o arquivo agora.");
+        })
+        .finally(() => setUploadingFiles((current) => Math.max(0, current - 1)));
     }
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
@@ -500,13 +527,22 @@ export function ChatWindow({ contact, conversationId, leadId }: ChatWindowProps)
         setRecording(false);
         if (blob.size > 0) {
           const fileName = `audio-${new Date().toISOString().replace(/[:.]/g, "-")}.webm`;
-          sendMediaPayload({
-            body: `${fileName} (${readableFileSize(blob.size)})`,
-            mediaMimeType: blob.type,
-            mediaSize: blob.size,
-            mediaUrl: URL.createObjectURL(blob),
-            messageType: "audio"
-          }).catch(() => undefined);
+          const file = new File([blob], fileName, { type: blob.type || "audio/webm" });
+          setUploadingFiles((current) => current + 1);
+          setActionMessage("Subindo audio para envio...");
+          uploadMedia(file)
+            .then((uploaded) => sendMediaPayload({
+              body: `${uploaded.originalName || fileName} (${readableFileSize(uploaded.mediaSize || blob.size)})`,
+              mediaMimeType: uploaded.mediaMimeType || blob.type || "audio/webm",
+              mediaSize: uploaded.mediaSize || blob.size,
+              mediaUrl: uploaded.mediaUrl,
+              messageType: "audio"
+            }))
+            .catch((error) => {
+              const message = error instanceof Error ? error.message : "Nao foi possivel subir o audio.";
+              setActionMessage(message.includes("R2 nao esta configurado") ? "R2 ainda nao esta configurado para audios. Configure MEDIA_BUCKET e R2_PUBLIC_BASE_URL." : "Nao foi possivel subir o audio agora.");
+            })
+            .finally(() => setUploadingFiles((current) => Math.max(0, current - 1)));
         }
       };
       recorder.start();

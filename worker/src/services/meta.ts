@@ -1,10 +1,10 @@
 import type { Env } from "../env";
 import type { NormalizedMessage } from "../types/chat";
-import { findLatestInboundMessageAt, findRecentOutboundText, getConversationStatus, saveMessage, transferConversationToHuman, updateMessageStatus } from "./d1";
-import { draftAgentReply } from "./agent-brain";
+import { findLatestInboundMessageAt, findRecentOutboundText, getConversationStatus, listMessages, saveMessage, transferConversationToHuman, updateMessageStatus } from "./d1";
+import { draftSmartAgentReply } from "./agent-intelligence";
 import { normalizeFacebookMessagingPayload } from "./facebook-adapter";
 import { normalizeInstagramMessagingPayload } from "./instagram-adapter";
-import { normalizeWhatsappCloudPayload, sendWhatsappCloudText } from "./whatsapp-cloud-adapter";
+import { normalizeWhatsappCloudPayload, sendWhatsappCloudMedia, sendWhatsappCloudText } from "./whatsapp-cloud-adapter";
 import { formatProviderError } from "./provider-error";
 
 type InboundMetaMessage = {
@@ -376,11 +376,66 @@ async function postGraphMessage(endpointId: string, env: Env, recipientId: strin
   return data as { message_id?: string; recipient_id?: string };
 }
 
+function graphAttachmentType(messageType: string) {
+  if (messageType === "audio") return "audio";
+  if (messageType === "video") return "video";
+  if (messageType === "image") return "image";
+  return "file";
+}
+
+async function postGraphMediaMessage(endpointId: string, env: Env, input: { mediaUrl: string; messageType: string; policy: { messagingType: "MESSAGE_TAG" | "RESPONSE"; tag?: "HUMAN_AGENT" }; recipientId: string }) {
+  if (!input.mediaUrl.startsWith("https://")) {
+    throw new Error("Para enviar midia no Facebook/Instagram, o arquivo precisa de uma URL publica HTTPS.");
+  }
+
+  const accessToken = requirePageAccessToken(env);
+  const response = await fetch(`https://graph.facebook.com/v20.0/${endpointId}/messages?access_token=${encodeURIComponent(accessToken)}`, {
+    body: JSON.stringify({
+      messaging_type: input.policy.messagingType,
+      ...(input.policy.tag ? { tag: input.policy.tag } : {}),
+      message: {
+        attachment: {
+          payload: {
+            is_reusable: true,
+            url: input.mediaUrl
+          },
+          type: graphAttachmentType(input.messageType)
+        }
+      },
+      recipient: { id: input.recipientId }
+    }),
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+      "content-type": "application/json"
+    },
+    method: "POST"
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(JSON.stringify(data));
+  }
+
+  return data as { message_id?: string; recipient_id?: string };
+}
+
 async function sendFacebookOrInstagramMessage(env: Env, input: { channel: string; conversationId: string; recipientId: string; senderType?: "agent" | "human"; text: string }) {
   const endpointId = getMessengerPageId(env);
   const policy = await resolveMessengerPolicy(env, input);
 
   return postGraphMessage(endpointId, env, input.recipientId, input.text, policy);
+}
+
+async function sendFacebookOrInstagramMedia(env: Env, input: { channel: string; conversationId: string; mediaUrl: string; messageType: string; recipientId: string; senderType?: "agent" | "human" }) {
+  const endpointId = getMessengerPageId(env);
+  const policy = await resolveMessengerPolicy(env, input);
+
+  return postGraphMediaMessage(endpointId, env, {
+    mediaUrl: input.mediaUrl,
+    messageType: input.messageType,
+    policy,
+    recipientId: input.recipientId
+  });
 }
 
 async function fetchChannelProfile(env: Env, provider: InboundMetaMessage["provider"], id: string) {
@@ -457,13 +512,44 @@ export async function sendOutboundChannelMessage(env: Env, input: { conversation
   return { channel, externalMessageId: undefined, ok: true };
 }
 
+export async function sendOutboundChannelMedia(env: Env, input: { body?: string; conversationId: string; mediaMimeType?: string; mediaUrl: string; messageType: string; senderType?: "agent" | "human" }) {
+  const { channel, recipientId } = getChannelRecipient(input.conversationId);
+
+  if (channel === "facebook" || channel === "instagram") {
+    const data = await sendFacebookOrInstagramMedia(env, { channel, conversationId: input.conversationId, mediaUrl: input.mediaUrl, messageType: input.messageType, recipientId, senderType: input.senderType });
+    return { channel, externalMessageId: data.message_id, ok: true };
+  }
+
+  if (channel === "whatsapp") {
+    return sendWhatsappCloudMedia(env, { body: input.body, conversationId: input.conversationId, mediaMimeType: input.mediaMimeType, mediaUrl: input.mediaUrl, messageType: input.messageType, recipientId, text: input.body ?? "" });
+  }
+
+  return { channel, externalMessageId: undefined, ok: true };
+}
+
 async function maybeAutoReplyToLead(env: Env, message: InboundMetaMessage, savedMessage: Record<string, unknown>) {
-  if (savedMessage.deduped || message.messageType !== "text" || !message.body.trim()) return;
+  if (savedMessage.deduped || (!message.body.trim() && message.messageType === "text")) return;
 
   const conversationStatus = await getConversationStatus(env.DB, message.conversationId);
   if (conversationStatus === "ATENDIMENTO_HUMANO") return;
 
-  const draft = await draftAgentReply({ leadId: message.leadId, message: message.body, offerValue: env.COMBO_FELICIDADE_VALUE, organizationId: "beleza-manaus" });
+  const context = await listMessages(env.DB, { conversationId: message.conversationId, limit: 12 });
+  const history = context.messages.map((item) => {
+    const row = item as { audio_transcription?: string | null; body?: string | null; direction?: string; image_description?: string | null; message_type?: string };
+    return {
+      direction: row.direction,
+      text: row.audio_transcription || row.image_description || row.body || "",
+      type: row.message_type
+    };
+  });
+  const mediaContext = message.messageType === "audio"
+    ? "Cliente enviou um audio. Se houver transcricao no historico, use como mensagem do cliente."
+    : message.messageType === "image"
+      ? "Cliente enviou uma imagem. Se houver descricao no historico, use como contexto."
+      : message.messageType !== "text"
+        ? `Cliente enviou uma midia do tipo ${message.messageType}.`
+        : "";
+  const draft = await draftSmartAgentReply({ channel: message.provider, history, leadId: message.leadId, mediaContext, message: message.body, offerValue: env.COMBO_FELICIDADE_VALUE, organizationId: "beleza-manaus" }, env);
   if (!draft.reply) return;
 
   if (draft.handoff) {
@@ -724,7 +810,56 @@ export async function syncInstagramInbox(env: Env) {
   };
 }
 
-export async function getAdsInsights(_env: Env) {
+export async function getAdsInsights(env: Env) {
+  const accountId = env.META_AD_ACCOUNT_ID?.replace(/^act_/, "");
+  const accessToken = env.META_CONVERSIONS_ACCESS_TOKEN || env.META_PAGE_ACCESS_TOKEN;
+
+  if (!accountId || !accessToken) {
+    return {
+      campaigns: [],
+      mode: "not-configured",
+      required: ["META_AD_ACCOUNT_ID", "META_CONVERSIONS_ACCESS_TOKEN"]
+    };
+  }
+
+  const fields = [
+    "campaign_id",
+    "campaign_name",
+    "adset_id",
+    "adset_name",
+    "ad_id",
+    "ad_name",
+    "impressions",
+    "clicks",
+    "spend",
+    "actions"
+  ].join(",");
+  const params = new URLSearchParams({
+    date_preset: "last_30d",
+    fields,
+    level: "ad",
+    limit: "100",
+    access_token: accessToken
+  });
+
+  const response = await fetch(`https://graph.facebook.com/v20.0/act_${accountId}/insights?${params.toString()}`);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    return {
+      campaigns: [],
+      error: data,
+      mode: "meta-error"
+    };
+  }
+
+  return {
+    campaigns: Array.isArray((data as { data?: unknown[] }).data) ? (data as { data: unknown[] }).data : [],
+    mode: "meta",
+    range: "last_30d"
+  };
+}
+
+export async function getAdsInsightsPlaceholder(_env: Env) {
   return {
     mode: "placeholder",
     campaigns: []
