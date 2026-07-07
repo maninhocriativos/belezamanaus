@@ -3,10 +3,36 @@ import { getSupabaseAdminHeaders } from "../services/supabase-admin";
 
 type CreateUserPayload = {
   email?: string;
+  username?: string;
   fullName?: string;
   password?: string;
   role?: string;
 };
+
+// Usuarios internos do CRM podem entrar so com nome de usuario, sem e-mail real.
+// O Supabase exige um e-mail, entao geramos um e-mail tecnico com este dominio.
+// Nada e enviado para ele: a conta e criada com email_confirm e o login usa senha.
+const INTERNAL_USER_DOMAIN = "belezamanaus.pages.dev";
+
+function isEmailAddress(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+function normalizeUsername(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, ".").replace(/[^a-z0-9._-]/g, "");
+}
+
+// Converte um nome de usuario (ou e-mail) no e-mail usado internamente no Supabase.
+function resolveUserEmail(input: { email?: string; username?: string }) {
+  const raw = (input.username ?? input.email ?? "").trim();
+  if (!raw) return { email: "", username: "" };
+  if (isEmailAddress(raw)) {
+    const email = raw.toLowerCase();
+    return { email, username: email.split("@")[0] };
+  }
+  const username = normalizeUsername(raw);
+  return { email: username ? `${username}@${INTERNAL_USER_DOMAIN}` : "", username };
+}
 
 function isValidServiceRole(env: Env) {
   return Boolean(env.SUPABASE_SERVICE_ROLE_KEY?.startsWith("eyJ"));
@@ -43,7 +69,7 @@ async function getPrimaryOrganizationId(env: Env) {
   return rows[0]?.id;
 }
 
-async function createAuthUser(env: Env, payload: Required<Pick<CreateUserPayload, "email" | "password">> & CreateUserPayload) {
+async function createAuthUser(env: Env, payload: { email: string; password: string; username: string; fullName: string }) {
   const response = await fetch(`${env.SUPABASE_URL}/auth/v1/admin/users`, {
     body: JSON.stringify({
       email: payload.email,
@@ -51,7 +77,8 @@ async function createAuthUser(env: Env, payload: Required<Pick<CreateUserPayload
       password: payload.password,
       user_metadata: {
         crm_profile_complete: true,
-        full_name: payload.fullName ?? payload.email,
+        full_name: payload.fullName,
+        username: payload.username,
         organization_name: "Beleza Manaus"
       }
     }),
@@ -66,7 +93,7 @@ async function createAuthUser(env: Env, payload: Required<Pick<CreateUserPayload
   return response.json() as Promise<{ id: string; email: string }>;
 }
 
-async function linkUserToOrganization(env: Env, user: { id: string; email: string }, organizationId: string, payload: CreateUserPayload) {
+async function linkUserToOrganization(env: Env, user: { id: string; email: string; fullName: string }, organizationId: string, payload: CreateUserPayload) {
   const headers = {
     ...getSupabaseAdminHeaders(env),
     prefer: "resolution=merge-duplicates"
@@ -74,7 +101,7 @@ async function linkUserToOrganization(env: Env, user: { id: string; email: strin
 
   await fetch(`${env.SUPABASE_URL}/rest/v1/profiles?on_conflict=id`, {
     body: JSON.stringify({
-      full_name: payload.fullName ?? user.email,
+      full_name: user.fullName,
       id: user.id,
       organization_id: organizationId,
       role: payload.role ?? "agent"
@@ -109,11 +136,16 @@ export async function handleUsers(request: Request, env: Env): Promise<Response>
   }
 
   const payload = (await request.json()) as CreateUserPayload;
-  const email = payload.email?.trim().toLowerCase();
+  const { email, username } = resolveUserEmail(payload);
   const password = payload.password ?? "";
+  const fullName = payload.fullName?.trim() || username || email;
 
-  if (!email || !password) {
-    return Response.json({ error: "Informe e-mail e senha." }, { status: 400 });
+  if (!email) {
+    return Response.json({ error: "Informe um nome de usuario (ou e-mail) valido." }, { status: 400 });
+  }
+
+  if (!password) {
+    return Response.json({ error: "Informe a senha inicial." }, { status: 400 });
   }
 
   if (password.length < 8 || !/[A-Z]/.test(password) || !/[a-z]/.test(password) || !/\d/.test(password)) {
@@ -126,10 +158,10 @@ export async function handleUsers(request: Request, env: Env): Promise<Response>
       return Response.json({ error: "Organizacao Beleza Manaus nao encontrada." }, { status: 404 });
     }
 
-    const user = await createAuthUser(env, { ...payload, email, password });
-    await linkUserToOrganization(env, user, organizationId, payload);
+    const user = await createAuthUser(env, { email, password, username, fullName });
+    await linkUserToOrganization(env, { ...user, fullName }, organizationId, payload);
 
-    return Response.json({ ok: true, user: { email: user.email, id: user.id, role: payload.role ?? "agent" } });
+    return Response.json({ ok: true, user: { email: user.email, username, id: user.id, role: payload.role ?? "agent" } });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Falha ao cadastrar usuario." }, { status: 500 });
   }

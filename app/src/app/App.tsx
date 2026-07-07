@@ -193,7 +193,7 @@ function DashboardView() {
   const [chatMetrics, setChatMetrics] = useState<ChatMetrics | null>(null);
   const [leads, setLeads] = useState<CrmLead[]>([]);
   const [loading, setLoading] = useState(true);
-  const [procedures, setProcedures] = useState<CrmProcedure[]>([]);
+  const [, setProcedures] = useState<CrmProcedure[]>([]);
   const [sales, setSales] = useState<CrmSale[]>([]);
 
   useEffect(() => {
@@ -214,7 +214,6 @@ function DashboardView() {
       .finally(() => setLoading(false));
   }, []);
 
-  const today = new Date().toISOString().slice(0, 10);
   const revenue = sales.reduce((sum, sale) => sum + Number(sale.amount || 0), 0);
   const liveMetrics = [
     { label: "Usuarios reais", value: loading ? "..." : String(chatMetrics?.total ?? leads.length), trend: "Chat" },
@@ -570,7 +569,7 @@ function SettingsView() {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [newPasswordConfirm, setNewPasswordConfirm] = useState("");
-  const [userEmail, setUserEmail] = useState("");
+  const [userLogin, setUserLogin] = useState("");
   const [userName, setUserName] = useState("");
   const [userRole, setUserRole] = useState("agent");
   const [userPassword, setUserPassword] = useState("");
@@ -643,8 +642,8 @@ function SettingsView() {
       return;
     }
 
-    if (!userEmail.trim()) {
-      setSettingsMessage("Informe o e-mail do novo usuario.");
+    if (!userLogin.trim()) {
+      setSettingsMessage("Informe o nome de usuario (ou e-mail) do novo usuario.");
       return;
     }
 
@@ -654,15 +653,15 @@ function SettingsView() {
     try {
       await apiFetch("/users", {
         body: JSON.stringify({
-          email: userEmail,
+          username: userLogin,
           fullName: userName,
           password: userPassword,
           role: userRole
         }),
         method: "POST"
       });
-      setSettingsMessage("Usuario cadastrado, vinculado ao Supabase e pronto para login.");
-      setUserEmail("");
+      setSettingsMessage("Usuario cadastrado e pronto para login com o nome de usuario e a senha.");
+      setUserLogin("");
       setUserName("");
       setUserPassword("");
       setUserRole("agent");
@@ -693,7 +692,7 @@ function SettingsView() {
         <h3 className="text-base font-semibold">Usuarios da equipe</h3>
         <div className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_180px_1fr]">
           <input className="rounded-lg border border-rosebrand-100 bg-transparent px-3 py-2 text-sm dark:border-zinc-800" onChange={(event) => setUserName(event.target.value)} placeholder="Nome" value={userName} />
-          <input className="rounded-lg border border-rosebrand-100 bg-transparent px-3 py-2 text-sm dark:border-zinc-800" onChange={(event) => setUserEmail(event.target.value)} placeholder="E-mail" type="email" value={userEmail} />
+          <input autoCapitalize="none" autoCorrect="off" className="rounded-lg border border-rosebrand-100 bg-transparent px-3 py-2 text-sm dark:border-zinc-800" onChange={(event) => setUserLogin(event.target.value)} placeholder="Usuario (sem e-mail)" type="text" value={userLogin} />
           <select className="rounded-lg border border-rosebrand-100 bg-transparent px-3 py-2 text-sm dark:border-zinc-800" onChange={(event) => setUserRole(event.target.value)} value={userRole}>
             <option value="agent">Atendente</option>
             <option value="manager">Gestor</option>

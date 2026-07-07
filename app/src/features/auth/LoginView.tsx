@@ -1,13 +1,14 @@
 import { useState } from "react";
 import { appEnv } from "../../lib/env";
 import { isSupabaseConfigured, supabase, supabaseConfigStatus } from "../../lib/supabase";
+import { isEmailAddress, toLoginEmail } from "../../lib/username";
 
 type LoginViewProps = {
   onDemoAccess: () => void;
 };
 
 export function LoginView({ onDemoAccess }: LoginViewProps) {
-  const [email, setEmail] = useState("maninhocriativos@gmail.com");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
@@ -18,11 +19,17 @@ export function LoginView({ onDemoAccess }: LoginViewProps) {
       return;
     }
 
+    const loginEmail = toLoginEmail(email);
+    if (!loginEmail) {
+      setMessage("Informe um nome de usuario ou e-mail.");
+      return;
+    }
+
     setLoading(true);
     setMessage("");
 
     const { error } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
+      email: loginEmail,
       password
     });
 
@@ -100,7 +107,7 @@ export function LoginView({ onDemoAccess }: LoginViewProps) {
         <p className="text-sm font-semibold text-rosebrand-600">Fisiolipo</p>
         <h1 className="mt-1 text-2xl font-bold">Entrar no CRM</h1>
         <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
-          Use o e-mail administrador da Beleza Manaus. A entrada por senha evita o limite de envio de e-mails.
+          Entre com seu nome de usuario (ou e-mail) e senha. Usuarios da equipe podem entrar so com o nome de usuario.
         </p>
 
         {!isSupabaseConfigured && (
@@ -112,13 +119,16 @@ export function LoginView({ onDemoAccess }: LoginViewProps) {
         )}
 
         <label className="mt-5 block text-sm font-medium" htmlFor="email">
-          E-mail
+          Usuario ou e-mail
         </label>
         <input
+          autoCapitalize="none"
+          autoCorrect="off"
           className="mt-2 w-full rounded-lg border border-rosebrand-100 bg-transparent px-3 py-2 text-sm outline-none focus:border-rosebrand-400 dark:border-zinc-800"
           id="email"
           onChange={(event) => setEmail(event.target.value)}
-          type="email"
+          placeholder="nome de usuario ou e-mail"
+          type="text"
           value={email}
         />
 
@@ -154,7 +164,7 @@ export function LoginView({ onDemoAccess }: LoginViewProps) {
 
         <button
           className="mt-3 w-full rounded-lg border border-rosebrand-100 px-4 py-2 text-sm font-semibold text-zinc-600 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-800 dark:text-zinc-300"
-          disabled={loading || !email}
+          disabled={loading || !isEmailAddress(email)}
           onClick={sendMagicLink}
           type="button"
         >
