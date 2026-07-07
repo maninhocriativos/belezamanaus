@@ -35,7 +35,9 @@ function resolveUserEmail(input: { email?: string; username?: string }) {
 }
 
 function isValidServiceRole(env: Env) {
-  return Boolean(env.SUPABASE_SERVICE_ROLE_KEY?.startsWith("eyJ"));
+  const key = env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+  // Aceita o formato antigo (JWT "eyJ...") e o novo formato de chave secreta ("sb_secret_...").
+  return key.startsWith("eyJ") || key.startsWith("sb_secret_");
 }
 
 async function requireAuthenticatedUser(request: Request, env: Env) {
